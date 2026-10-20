@@ -207,6 +207,9 @@ const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
 let DATA = {members:[...CONFIG.MEMBERS], recurring_guests:[], days:{}, log:[], target:"2027-01-31"};
 let me = localStorage.getItem("bd_me") || "";
+// Anoniem apparaat-ID: onderscheidt apparaten in de log als iemand geen naam heeft gekozen
+let DEVID = localStorage.getItem("bd_devid");
+if(!DEVID){ DEVID = Math.random().toString(36).slice(2,8); localStorage.setItem("bd_devid", DEVID); }
 let dirty = false;          // lokale wijzigingen nog niet naar de cloud
 
 /* ---------- helpers ---------- */
@@ -237,7 +240,7 @@ function setStatus(dateStr, name, st, isGuest){
 function logChange(target, dateStr, from, to){
   DATA.log.unshift({
     t: new Date().toISOString().replace("T"," ").slice(0,16),
-    who: me || "iemand", target, date: dateStr, from, to
+    who: me || ("apparaat-" + DEVID), target, date: dateStr, from, to
   });
   DATA.log = DATA.log.slice(0, CONFIG.LOG_MAX);   // log blijft begrensd en is readonly in de UI
 }
@@ -408,7 +411,7 @@ document.body.addEventListener("click", e=>{
     const guest = el.dataset.guest==="1";
     const cur = guest? ((day(dateStr).guests.find(g=>g.name===name)||{}).st||"") : (day(dateStr).st[name]||"");
     const idx = STATUS.indexOf(cur);
-    setStatus(dateStr, name, idx>=0 && idx<STATUS.length-1 ? STATUS[idx+1] : "", guest);
+    setStatus(dateStr, name, idx < STATUS.length-1 ? STATUS[idx+1] : "", guest);
   }
   else if(act==="rmguest"){ e.stopPropagation(); removeGuest(dateStr, name); }
   else if(act==="note"){ e.stopPropagation(); openNoteSheet(dateStr, name); }
