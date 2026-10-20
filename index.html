@@ -63,11 +63,11 @@
   .chips{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 16px}
   .chip{
     display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
-    font-size:14px;font-weight:600;cursor:pointer;border:1.5px solid transparent;
-    background:#f2f2f7;color:var(--ink2);user-select:none;transition:transform .08s;
+    font-size:14px;font-weight:600;cursor:pointer;border:1.5px solid rgba(0,0,0,.14);
+    background:#fff;color:var(--ink);user-select:none;transition:transform .08s;
   }
   .chip:active{transform:scale(.94)}
-  .chip .st{width:10px;height:10px;border-radius:50%;background:#c7c7cc;flex:none}
+  .chip .st{width:10px;height:10px;border-radius:50%;background:#d1d1d6;flex:none}
   .chip[data-st="ja"]{background:rgba(52,199,89,.14);border-color:rgba(52,199,89,.4);color:#1d7a35}
   .chip[data-st="ja"] .st{background:var(--ja)}
   .chip[data-st="deels"]{background:rgba(0,122,255,.12);border-color:rgba(0,122,255,.35);color:#005ecb}
@@ -378,10 +378,6 @@ function dayCard(dateStr, past){
       <span class="b"><i style="background:var(--nee)"></i>${c.nee} nee</span>
     </div>
     ${chipRow(dateStr, d)}
-    <div class="row-btns">
-      <button class="mini" data-act="log" data-date="${dateStr}">🕘 wijzigingenlog</button>
-      ${past? "" : `<button class="mini" data-act="del" data-date="${dateStr}">verwijder dag</button>`}
-    </div>
   </div>`;
 }
 function render(){
@@ -476,11 +472,18 @@ function openGuestSheet(dateStr){
 
 function openTitleSheet(dateStr){
   const cur = day(dateStr).title||"";
-  openSheet(`<h3>Titel voor ${fmtDate(dateStr)}</h3>
-    <input type="text" id="tName" placeholder="bv. generale" value="${esc(cur)}" autocomplete="off">
-    <button class="cta" id="tOk">Opslaan</button>`);
+  const future = dateStr >= today();
+  openSheet(`<h3>✎ ${fmtDate(dateStr)}</h3>
+    <input type="text" id="tName" placeholder="Titel (bv. generale)" value="${esc(cur)}" autocomplete="off">
+    <button class="cta" id="tOk">Opslaan</button>
+    <button class="cta" id="tLog" style="background:#8e8e93;margin-top:10px">🕘 Wijzigingenlog</button>
+    ${future? `<button class="cta" id="tDel" style="background:#ff3b30;margin-top:10px">Verwijder dag</button>` : ""}`);
   $("#tName").focus();
   $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); save(); closeSheet(); };
+  $("#tLog").onclick = ()=> openLogSheet(dateStr);
+  if($("#tDel")) $("#tDel").onclick = ()=>{
+    if(confirm("Deze dag verwijderen uit Speleu?")){ delete DATA.days[dateStr]; save(); closeSheet(); }
+  };
 }
 
 function openLogSheet(dateStr){
