@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#f2f2f7" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Speleu?</title>
+<style>
+  :root{
+    --bg:#f2f2f7; --card:#ffffff; --ink:#1c1c1e; --ink2:#8e8e93;
+    --ja:#34c759; --nee:#ff3b30; --misschien:#ff9500; --deels:#007aff;
+    --accent:#007aff; --radius:18px;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh}
+  header{
+    position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;
+    padding:calc(env(safe-area-inset-top) + 14px) 16px 12px;
+    background:rgba(242,242,247,.85);backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:.5px solid rgba(0,0,0,.08);
+  }
+  header h1{font-size:22px;font-weight:700;margin:0;flex:1;letter-spacing:-.3px}
+  .iconbtn{
+    width:40px;height:40px;border:none;border-radius:12px;background:transparent;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);
+  }
+  .iconbtn:active{background:rgba(0,0,0,.08)}
+  .avatar{
+    width:40px;height:40px;border-radius:50%;background:linear-gradient(145deg,#5ac8fa,#007aff);
+    color:#fff;font-weight:700;font-size:15px;border:none;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;padding:0;overflow:hidden;
+  }
+  main{max-width:640px;margin:0 auto;padding:16px 16px 120px}
+  .syncbar{
+    display:none;align-items:center;gap:8px;font-size:13px;color:var(--ink2);
+    background:#fff;border-radius:12px;padding:8px 12px;margin-bottom:12px;
+  }
+  .syncbar.show{display:flex}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--nee);flex:none}
+  .dot.ok{background:var(--ja)}
+  .day{
+    background:var(--card);border-radius:var(--radius);margin-bottom:14px;
+    box-shadow:0 1px 3px rgba(0,0,0,.07);overflow:hidden;
+  }
+  .dayhead{display:flex;align-items:center;gap:12px;padding:14px 16px 10px}
+  .dateblock{
+    flex:none;width:52px;height:56px;border-radius:14px;text-align:center;
+    background:linear-gradient(160deg,#eaf4ff,#dceaff);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+  }
+  .dateblock .dow{font-size:10px;font-weight:700;color:var(--deels);text-transform:uppercase;letter-spacing:.5px}
+  .dateblock .dn{font-size:22px;font-weight:800;line-height:1;color:var(--ink)}
+  .dateblock .mo{font-size:10px;font-weight:600;color:var(--ink2);text-transform:uppercase}
+  .daytitlewrap{flex:1;min-width:0}
+  .daytitle{font-size:17px;font-weight:650;letter-spacing:-.2px;display:flex;align-items:center;gap:6px}
+  .daytitle .pen{opacity:.35;cursor:pointer}
+  .daysub{font-size:12px;color:var(--ink2);margin-top:2px}
+  .badges{padding:0 16px 4px;display:flex;flex-wrap:wrap;gap:14px;font-size:12px;font-weight:600}
+  .badges .b{display:flex;align-items:center;gap:5px}
+  .badges .b i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 16px}
+  .chip{
+    display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
+    font-size:14px;font-weight:600;cursor:pointer;border:1.5px solid transparent;
+    background:#f2f2f7;color:var(--ink2);user-select:none;transition:transform .08s;
+  }
+  .chip:active{transform:scale(.94)}
+  .chip .st{width:10px;height:10px;border-radius:50%;background:#c7c7cc;flex:none}
+  .chip[data-st="ja"]{background:rgba(52,199,89,.14);border-color:rgba(52,199,89,.4);color:#1d7a35}
+  .chip[data-st="ja"] .st{background:var(--ja)}
+  .chip[data-st="deels"]{background:rgba(0,122,255,.12);border-color:rgba(0,122,255,.35);color:#005ecb}
+  .chip[data-st="deels"] .st{background:var(--deels)}
+  .chip[data-st="misschien"]{background:rgba(255,149,0,.14);border-color:rgba(255,149,0,.4);color:#a35c00}
+  .chip[data-st="misschien"] .st{background:var(--misschien)}
+  .chip[data-st="nee"]{background:rgba(255,59,48,.12);border-color:rgba(255,59,48,.35);color:#c22b22}
+  .chip[data-st="nee"] .st{background:var(--nee)}
+  .chip.guest{border-style:solid}
+  .chip .x{opacity:.5;font-size:12px}
+  .chip .chipnote{font-size:11px;opacity:.55;cursor:pointer;padding:0 1px}
+  .chip .chipnote:hover{opacity:1}
+  .addguest{
+    border:none;background:none;color:var(--deels);font-size:13px;font-weight:600;
+    padding:6px 8px;cursor:pointer;
+  }
+  .day.target{
+    background:linear-gradient(160deg,#fff 55%,#eef6ff);border:2px solid rgba(0,122,255,.45);
+    box-shadow:0 4px 16px rgba(0,122,255,.18);
+  }
+  .targetlabel{
+    display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#fff;
+    background:var(--deels);border-radius:999px;padding:4px 10px;letter-spacing:.4px;text-transform:uppercase;
+  }
+  .countdown{font-size:12px;font-weight:700;color:var(--deels);margin-left:auto;text-align:right;line-height:1.35}
+  .countdown b{display:block;font-size:16px}
+  .row-btns{display:flex;justify-content:space-between;align-items:center;padding:0 16px 14px}
+  .mini{border:none;background:none;color:var(--ink2);font-size:12px;cursor:pointer;padding:6px}
+  .mini:active{opacity:.5}
+  .sectionlabel{font-size:13px;font-weight:700;color:var(--ink2);margin:22px 4px 10px;text-transform:uppercase;letter-spacing:.5px}
+  .overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;display:none;
+    align-items:flex-end;justify-content:center;
+  }
+  .overlay.show{display:flex}
+  .sheet{
+    background:var(--card);width:100%;max-width:640px;border-radius:22px 22px 0 0;
+    padding:20px 20px calc(env(safe-area-inset-bottom) + 24px);
+    max-height:82vh;overflow:auto;
+  }
+  .sheet h3{margin:0 0 14px;font-size:19px;letter-spacing:-.3px}
+  .menuitem{
+    display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:none;background:none;
+    padding:14px 4px;font-size:16px;color:var(--ink);border-bottom:.5px solid rgba(0,0,0,.07);cursor:pointer;
+    text-decoration:none;
+  }
+  .menuitem:last-child{border-bottom:none}
+  .menuitem span.g{flex:1}
+  .menuitem .sub{font-size:12px;color:var(--ink2);display:block;margin-top:2px}
+  .seg{display:flex;gap:8px;margin:14px 0}
+  .seg button{
+    flex:1;border:none;border-radius:12px;padding:12px 0;font-size:14px;font-weight:700;cursor:pointer;
+    background:#f2f2f7;color:var(--ink2);font-family:inherit;
+  }
+  .seg button.sel{background:#8e8e93;color:#fff}
+  .seg button.sel[data-v="ja"]{background:var(--ja)}
+  .seg button.sel[data-v="nee"]{background:var(--nee)}
+  .seg button.sel[data-v="misschien"]{background:var(--misschien)}
+  .seg button.sel[data-v="deels"]{background:var(--deels)}
+  input[type=text],input[type=date]{
+    width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(0,0,0,.12);
+    font-size:16px;background:#fff;color:var(--ink);margin-bottom:12px;font-family:inherit;
+  }
+  .checkrow{display:flex;align-items:center;gap:10px;font-size:15px;padding:4px 0 14px}
+  .checkrow input{width:20px;height:20px;accent-color:var(--accent)}
+  .cta{
+    width:100%;border:none;border-radius:14px;background:var(--accent);color:#fff;
+    font-size:16px;font-weight:700;padding:14px;cursor:pointer;margin-top:6px;font-family:inherit;
+  }
+  .cta:active{opacity:.8}
+  .logline{font-size:13px;color:var(--ink);padding:9px 0;border-bottom:.5px solid rgba(0,0,0,.07)}
+  .logline b{font-weight:650}
+  .logline .t{color:var(--ink2);font-size:11px}
+  .loglist{max-height:44vh;overflow:auto}
+  .empty{color:var(--ink2);font-size:14px;text-align:center;padding:32px 0}
+  .toast{
+    position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#1c1c1e;color:#fff;
+    padding:11px 20px;border-radius:999px;font-size:14px;font-weight:600;z-index:60;
+    opacity:0;transition:opacity .25s;pointer-events:none;max-width:86vw;text-align:center;
+  }
+  .toast.show{opacity:1}
+  .fab{
+    position:fixed;right:20px;bottom:calc(env(safe-area-inset-bottom) + 20px);z-index:30;
+    width:56px;height:56px;border-radius:50%;border:none;background:var(--accent);color:#fff;
+    cursor:pointer;box-shadow:0 6px 18px rgba(0,122,255,.4);display:flex;align-items:center;justify-content:center;
+  }
+  a{color:var(--deels)}
+</style>
+</head>
+<body>
+<header>
+  <button class="iconbtn" id="btnMenu" aria-label="Menu">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <h1>Speleu?</h1>
+  <button class="iconbtn" id="btnMeAdd" title="Jezelf toevoegen" aria-label="Jezelf toevoegen">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19c.7-3 2.8-4.6 5.5-4.6s4.8 1.6 5.5 4.6"/><path d="M17 7.5v6M14 10.5h6"/></svg>
+  </button>
+  <button class="avatar" id="btnMe" style="display:none"></button>
+</header>
+
+<main>
+  <div class="syncbar" id="syncbar"><span class="dot" id="syncdot"></span><span id="synctext"></span></div>
+  <div id="upcoming"></div>
+  <div id="past"></div>
+</main>
+
+<button class="fab" id="fabAdd" aria-label="Datum toevoegen">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+</button>
+
+<div class="overlay" id="ovMenu"><div class="sheet" id="shMenu"></div></div>
+<div class="overlay" id="ovSheet"><div class="sheet" id="shSheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= CONFIG =================
+ * Zonder login: de app praat met een kleine Google Apps Script-webapp die
+ * namens jou leest en schrijft in banddays.json (in de gedeelde Drive-map).
+ * Iedereen met de link mag lezen én schrijven; de app onthoudt per apparaat
+ * wie je bent (localStorage) en logt elke wijziging.
+ * Laat SCRIPT_URL leeg → demomodus met localStorage (preview werkt meteen).
+ */
+const CONFIG = {
+  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbyb3juYzDPYYKV495h_z9Y5kdfueSfv8AZdtkj5Ke39BK_7ceM5jhIaoOfmm4wQyE-7sg/exec",
+  MONOLISA_URL: "https://resubyrah.github.io/moly/monolisa/",
+  MEMBERS: ["Frans", "Peter", "Patrick", "Wim", "Harrie"],  // vaste bandleden (aliases, zelf aanpasbaar)
+  SATURDAYS: 10,                       // aantal komende zaterdagen
+  HISTORY_MONTHS: 6,                   // dagen ouder dan dit worden uit de data gesnoeid
+  LOG_MAX: 300                         // max regels in de wijzigingenlog
+};
+/* ========================================= */
+
+const STATUS = ["ja","deels","misschien","nee"];   // tik op chip = doorlopen
+const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
+const DOWS = ["zo","ma","di","wo","do","vr","za"];
+
+let DATA = {members:[...CONFIG.MEMBERS], recurring_guests:[], days:{}, log:[], target:"2027-01-31"};
+let me = localStorage.getItem("bd_me") || "";
+let dirty = false;          // lokale wijzigingen nog niet naar de cloud
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200); }
+function iso(d){ return d.toISOString().slice(0,10); }
+function fmtDate(s){ const d=new Date(s+"T12:00:00"); return `${DOWS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`; }
+function nextSaturdays(n){
+  const out=[]; const d=new Date(); d.setHours(12,0,0,0);
+  while(d.getDay()!==6) d.setDate(d.getDate()+1);
+  for(let i=0;i<n;i++){ out.push(iso(d)); d.setDate(d.getDate()+7); }
+  return out;
+}
+function today(){ const d=new Date(); d.setHours(12,0,0,0); return iso(d); }
+
+/* ---------- data ---------- */
+function day(dateStr){ if(!DATA.days[dateStr]) DATA.days[dateStr]={title:"",st:{},guests:[]}; return DATA.days[dateStr]; }
+
+function setStatus(dateStr, name, st, isGuest){
+  const d = day(dateStr);
+  const old = (isGuest? (d.guests.find(g=>g.name===name)||{}).st : d.st[name]) || "";
+  if(isGuest){ const g=d.guests.find(g=>g.name===name); if(g) g.st=st; }
+  else { if(st) d.st[name]=st; else delete d.st[name]; }
+  logChange(name, dateStr, old, st);
+  save();
+}
+function logChange(target, dateStr, from, to){
+  DATA.log.unshift({
+    t: new Date().toISOString().replace("T"," ").slice(0,16),
+    who: me || "iemand", target, date: dateStr, from, to
+  });
+  DATA.log = DATA.log.slice(0, CONFIG.LOG_MAX);   // log blijft begrensd en is readonly in de UI
+}
+
+function addGuest(dateStr, name){
+  const d = day(dateStr);
+  if(!name || d.guests.some(g=>g.name.toLowerCase()===name.toLowerCase())) return;
+  d.guests.push({name, st:""});
+  logChange(name, dateStr, "", "toegevoegd");
+  save();
+}
+function removeGuest(dateStr, name){
+  const d = day(dateStr);
+  d.guests = d.guests.filter(g=>g.name!==name);
+  logChange(name, dateStr, "", "verwijderd");
+  save();
+}
+
+/* ---------- opslag: localStorage + Apps Script (zonder login) ---------- */
+function save(){
+  localStorage.setItem("bd_data", JSON.stringify(DATA));
+  dirty = true; prune(); render();
+  pushCloud();
+}
+function prune(){
+  const cut = new Date(); cut.setHours(12,0,0,0);
+  cut.setMonth(cut.getMonth() - CONFIG.HISTORY_MONTHS);
+  const cutStr = iso(cut);
+  Object.keys(DATA.days).forEach(dk=>{ if(dk < cutStr) delete DATA.days[dk]; });
+  DATA.log = DATA.log.slice(0, CONFIG.LOG_MAX);
+  // Extra spelers die op de meest recente afgelopen dag niet gereageerd
+  // hebben, verdwijnen weer uit de standaardlijst.
+  const t = today();
+  const past = Object.keys(DATA.days).filter(k=>k<t).sort();
+  const last = past[past.length-1];
+  if(!last) return;
+  DATA.recurring_guests = (DATA.recurring_guests||[]).filter(g=>{
+    if(g.since > last) return true;              // pas later aangemeld → nog geen oordeel
+    const wasThere = !!(DATA.days[last].st||{})[g.name];
+    if(!wasThere) logChange(g.name, last, "extra speler", "automatisch van lijst: niet gereageerd");
+    return wasThere;
+  });
+}
+
+function renameMember(oldN, newN){
+  const i = DATA.members.indexOf(oldN);
+  if(i>=0 && newN) DATA.members[i] = newN;
+  Object.values(DATA.days).forEach(d=>{
+    if(d.st && oldN in d.st){ d.st[newN] = d.st[oldN]; delete d.st[oldN]; }
+  });
+  logChange(newN, "", oldN, "alias gewijzigd");
+}
+
+async function load(){
+  const local = localStorage.getItem("bd_data");
+  if(local){ try{ DATA = JSON.parse(local); }catch(e){} }
+  if(CONFIG.SCRIPT_URL){
+    try{
+      const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now());
+      if(r.ok){
+        const remote = await r.json();
+        if(remote && remote.days){ DATA = remote; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
+      }
+      setSync(true, dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map");
+    }catch(e){ setSync(false, "Cloud niet bereikbaar – lokale gegevens"); }
+  } else {
+    setSync(false, "Demomodus: opgeslagen op dit apparaat");
+  }
+  render();
+}
+
+function setSync(ok, txt){
+  const b=$("#syncbar"); b.classList.add("show");
+  $("#synctext").textContent = txt + (ok? "" : " · vul SCRIPT_URL in CONFIG voor cloud");
+  $("#syncdot").className = "dot" + (ok? " ok":"");
+}
+
+async function pushCloud(){
+  if(!CONFIG.SCRIPT_URL) return;
+  prune();
+  try{
+    const r = await fetch(CONFIG.SCRIPT_URL, {
+      method:"POST",
+      headers:{"Content-Type":"text/plain"},   // text/plain → geen CORS-preflight
+      body: JSON.stringify(DATA)
+    });
+    if(r.ok){ dirty = false; setSync(true, "Gesynchroniseerd met de gedeelde map"); }
+    else throw new Error();
+  }catch(e){ setSync(true, "Opslaan mislukt – lokaal bewaard, probeert het later opnieuw"); }
+}
+
+/* ---------- render ---------- */
+function memberChip(dateStr, name, st, guest){
+  const x = guest? `<span class="x" data-act="rmguest" data-date="${dateStr}" data-name="${esc(name)}">✕</span>` : "";
+  const note = (day(dateStr).notes||{})[name] || "";
+  return `<span class="chip${guest?" guest":""}" data-st="${st}" data-act="cycle" data-date="${dateStr}" data-name="${esc(name)}" data-guest="${guest?1:0}">
+    <span class="st"></span>${esc(name)}<span class="chipnote" data-act="note" data-date="${dateStr}" data-name="${esc(name)}" title="${esc(note)}">${note? "💬" : "✎"}</span>${x}</span>`;
+}
+function chipRow(dateStr, d){
+  let html = "";
+  DATA.members.forEach(m=>{ html += memberChip(dateStr, m, d.st[m]||"", false); });
+  (DATA.recurring_guests||[]).forEach(g=>{ html += memberChip(dateStr, g.name, d.st[g.name]||"", false); });
+  d.guests.forEach(g=>{ html += memberChip(dateStr, g.name, g.st||"", true); });
+  html += `<button class="addguest" data-act="addguest" data-date="${dateStr}">＋ iemand</button>`;
+  return `<div class="chips">${html}</div>`;
+}
+function counts(d){
+  const c = {ja:0,deels:0,misschien:0,nee:0};
+  Object.values(d.st||{}).forEach(v=>{ if(c[v]!==undefined) c[v]++; });
+  (d.guests||[]).forEach(g=>{ if(c[g.st]!==undefined) c[g.st]++; });
+  return c;
+}
+function dayCard(dateStr, past){
+  const d = day(dateStr);
+  const dt = new Date(dateStr+"T12:00:00");
+  const c = counts(d);
+  const isTarget = DATA.target && dateStr===DATA.target;
+  const isSat = dt.getDay()===6;
+  const title = d.title? esc(d.title) : (isTarget? "Optreden" : (isSat? "Repetitie" : "Extra dag"));
+  let cd = "";
+  if(isTarget){
+    const diff = Math.round((new Date(dateStr+"T12:00:00") - new Date(today()+"T12:00:00"))/86400000);
+    cd = `<div class="countdown">nog<b>${diff>0? diff : 0}</b>${diff===1? "dag" : "dagen"}</div>`;
+  }
+  return `<div class="day${isTarget?" target":""}">
+    <div class="dayhead">
+      <div class="dateblock"><div class="dow">${DOWS[dt.getDay()]}</div><div class="dn">${dt.getDate()}</div><div class="mo">${MONTHS[dt.getMonth()]}</div></div>
+      <div class="daytitlewrap">
+        <div class="daytitle">${isTarget? '<span class="targetlabel">🎯 Optreden</span>' : ""} ${title}<span class="pen" data-act="title" data-date="${dateStr}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L8 20l-5 1 1-5z"/></svg></span></div>
+        <div class="daysub">${fmtDate(dateStr)}${isSat?" · zaterdag":""}</div>
+      </div>${cd}
+    </div>
+    <div class="badges">
+      <span class="b"><i style="background:var(--ja)"></i>${c.ja} ja</span>
+      <span class="b"><i style="background:var(--deels)"></i>${c.deels} deels</span>
+      <span class="b"><i style="background:var(--misschien)"></i>${c.misschien} misschien</span>
+      <span class="b"><i style="background:var(--nee)"></i>${c.nee} nee</span>
+    </div>
+    ${chipRow(dateStr, d)}
+    <div class="row-btns">
+      <button class="mini" data-act="log" data-date="${dateStr}">🕘 wijzigingenlog</button>
+      ${past? "" : `<button class="mini" data-act="del" data-date="${dateStr}">verwijder dag</button>`}
+    </div>
+  </div>`;
+}
+function render(){
+  const av = $("#btnMe");
+  if(me){ av.style.display="flex"; av.textContent = me.slice(0,2).toUpperCase(); $("#btnMeAdd").style.display="none"; }
+  else { av.style.display="none"; $("#btnMeAdd").style.display="flex"; }
+
+  const sats = nextSaturdays(CONFIG.SATURDAYS);
+  sats.forEach(s=>{ if(!DATA.days[s]) DATA.days[s]={title:"",st:{},guests:[]}; });
+  if(DATA.target && !DATA.days[DATA.target]) DATA.days[DATA.target]={title:"",st:{},guests:[]};
+
+  const t = today();
+  const all = Object.keys(DATA.days).sort();
+  const up = all.filter(dk=>dk>=t);
+  const pastD = all.filter(dk=>dk<t);
+
+  $("#upcoming").innerHTML = up.map(dk=>dayCard(dk,false)).join("");
+  $("#past").innerHTML = pastD.length?
+    `<div class="sectionlabel">🗓 Historie</div>` + pastD.slice().reverse().map(dk=>dayCard(dk,true)).join("") : "";
+}
+
+/* ---------- interactie ---------- */
+document.body.addEventListener("click", e=>{
+  const el = e.target.closest("[data-act]");
+  if(!el) return;
+  const act = el.dataset.act, dateStr = el.dataset.date, name = el.dataset.name;
+  if(act==="cycle"){
+    const guest = el.dataset.guest==="1";
+    const cur = guest? ((day(dateStr).guests.find(g=>g.name===name)||{}).st||"") : (day(dateStr).st[name]||"");
+    const idx = STATUS.indexOf(cur);
+    setStatus(dateStr, name, idx>=0 && idx<STATUS.length-1 ? STATUS[idx+1] : "", guest);
+  }
+  else if(act==="rmguest"){ e.stopPropagation(); removeGuest(dateStr, name); }
+  else if(act==="note"){ e.stopPropagation(); openNoteSheet(dateStr, name); }
+  else if(act==="addguest"){ openGuestSheet(dateStr); }
+  else if(act==="title"){ openTitleSheet(dateStr); }
+  else if(act==="log"){ openLogSheet(dateStr); }
+  else if(act==="del"){
+    if(confirm("Deze dag verwijderen uit Speleu??")){ delete DATA.days[dateStr]; save(); }
+  }
+});
+
+/* ---------- sheets ---------- */
+function openSheet(html){ $("#shSheet").innerHTML = html; $("#ovSheet").classList.add("show"); }
+function closeSheet(){ $("#ovSheet").classList.remove("show"); }
+$("#ovSheet").addEventListener("click", e=>{ if(e.target.id==="ovSheet") closeSheet(); });
+
+function openNoteSheet(dateStr, name){
+  const d = day(dateStr);
+  if(!d.notes) d.notes = {};
+  const cur = d.notes[name] || "";
+  openSheet(`<h3>💬 ${esc(name)} · ${fmtDate(dateStr)}</h3>
+    <input type="text" id="nText" placeholder="Kleine opmerking (bv. 'vanaf 15:00', 'twijfelt nog')" value="${esc(cur)}" autocomplete="off">
+    <button class="cta" id="nOk">Opslaan</button>
+    ${cur? `<button class="cta" id="nDel" style="background:#8e8e93;margin-top:10px">Opmerking wissen</button>` : ""}`);
+  $("#nText").focus();
+  $("#nOk").onclick = ()=>{
+    d.notes[name] = $("#nText").value.trim();
+    if(d.notes[name]) logChange(name, dateStr, cur, "opmerking: " + d.notes[name]);
+    save(); closeSheet();
+  };
+  if($("#nDel")) $("#nDel").onclick = ()=>{
+    delete d.notes[name];
+    logChange(name, dateStr, cur, "opmerking gewist");
+    save(); closeSheet();
+  };
+}
+
+function openGuestSheet(dateStr){
+  openSheet(`<h3>Iemand toevoegen voor ${fmtDate(dateStr)}</h3>
+    <input type="text" id="gName" placeholder="Naam" autocomplete="off">
+    <p style="font-size:13px;color:var(--ink2);margin-top:-6px">En direct even de beschikbaarheid:</p>
+    <div class="seg" id="gSeg">
+      <button data-v="ja">ja</button><button data-v="deels">deels</button>
+      <button data-v="misschien">misschien</button><button data-v="nee">nee</button>
+    </div>
+    <button class="cta" id="gOk">Toevoegen</button>`);
+  let gst = "";
+  $("#gSeg").addEventListener("click", e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    gst = gst===b.dataset.v? "" : b.dataset.v;
+    $("#gSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("sel", x.dataset.v===gst));
+  });
+  $("#gOk").onclick = ()=>{
+    const n = $("#gName").value.trim();
+    if(!n){ toast("Vul een naam in"); return; }
+    addGuest(dateStr, n);
+    if(gst) setStatus(dateStr, n, gst, true);
+    closeSheet();
+  };
+}
+
+function openTitleSheet(dateStr){
+  const cur = day(dateStr).title||"";
+  openSheet(`<h3>Titel voor ${fmtDate(dateStr)}</h3>
+    <input type="text" id="tName" placeholder="bv. generale" value="${esc(cur)}" autocomplete="off">
+    <button class="cta" id="tOk">Opslaan</button>`);
+  $("#tName").focus();
+  $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); save(); closeSheet(); };
+}
+
+function openLogSheet(dateStr){
+  const lines = DATA.log.filter(l=>l.date===dateStr).map(l=>
+    `<div class="logline"><b>${esc(l.who)}</b> zette <b>${esc(l.target)}</b> van “${esc(l.from||"—")}” naar “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
+  ).join("");
+  openSheet(`<h3>Wijzigingenlog · ${fmtDate(dateStr)}</h3>
+    <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Readonly – alleen geregistreerde wijzigingen</p>
+    <div class="loglist">${lines || `<div class="empty">Nog geen wijzigingen</div>`}</div>
+    <button class="cta" id="lOk">Sluiten</button>`);
+  $("#lOk").onclick = closeSheet;
+}
+
+/* ---------- menu ---------- */
+function openMenu(){
+  $("#shMenu").innerHTML = `
+    <h3>☰ Menu</h3>
+    <button class="menuitem" data-m="me"><span class="g">👤 ${me? "Jij bent: "+esc(me) : "Jezelf toevoegen"}<span class="sub">Tik je naam aan of meld je aan — wordt onthouden op dit apparaat</span></span></button>
+    <button class="menuitem" data-m="date"><span class="g">📅 Extra datum toevoegen<span class="sub">Anders dan een zaterdag</span></span></button>
+    <button class="menuitem" data-m="target"><span class="g">🎯 Optreden / doel instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
+    <button class="menuitem" data-m="hist"><span class="g">🕘 Historie opvragen<span class="sub">Eerdere dagen (onderaan de lijst)</span></span></button>
+    <button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>
+    <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🎵 Opnamen in de Mono Lisa app<span class="sub">Moly · muziekspeler</span></span></a>`;
+  $("#ovMenu").classList.add("show");
+}
+$("#btnMenu").onclick = openMenu;
+$("#ovMenu").addEventListener("click", e=>{
+  if(e.target.id==="ovMenu"){ $("#ovMenu").classList.remove("show"); return; }
+  const b = e.target.closest("[data-m]"); if(!b) return;
+  $("#ovMenu").classList.remove("show");
+  const m = b.dataset.m;
+  if(m==="me") openMeSheet();
+  else if(m==="date") openDateSheet();
+  else if(m==="target") openTargetSheet();
+  else if(m==="hist"){ window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }
+  else if(m==="fulllog") openFullLog();
+});
+
+function openMeSheet(){
+  const isMember = DATA.members.includes(me);
+  const isExtra = (DATA.recurring_guests||[]).some(g=>g.name===me);
+  if(isMember || isExtra){
+    openSheet(`<h3>Jij bent ${esc(me)}</h3>
+      <p style="font-size:13px;color:var(--ink2)">${isMember? "Je alias in de bandlijst — mag je zelf aanpassen:" : "Je naam — mag je zelf aanpassen:"}</p>
+      <input type="text" id="meName" value="${esc(me)}" autocomplete="off">
+      ${isMember? "" : `<label class="checkrow"><input type="checkbox" id="meRec" checked> meedoen op alle komende dagen</label>
+      <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Uitgezet? Dan sta je er alleen nog op dagen waarop je je hebt opgegeven. Reageer je nergens op de laatste dag, dan verdwijn je van de lijst.</p>`}
+      <button class="cta" id="meOk">Opslaan</button>`);
+    $("#meName").focus();
+    $("#meOk").onclick = ()=>{
+      const n = $("#meName").value.trim();
+      if(!n){ toast("Vul een naam in"); return; }
+      if(n!==me){
+        if(isMember) renameMember(me, n);
+        else{
+          const g = DATA.recurring_guests.find(g=>g.name===me);
+          if(g) g.name = n;
+          Object.values(DATA.days).forEach(d=>{
+            if(d.st && me in d.st){ d.st[n]=d.st[me]; delete d.st[me]; }
+          });
+          logChange(n, "", me, "naam gewijzigd");
+        }
+        me = n; localStorage.setItem("bd_me", n);
+      }
+      if(!isMember){
+        const g = DATA.recurring_guests.find(g=>g.name===me);
+        if(g && !$("#meRec").checked){
+          DATA.recurring_guests = DATA.recurring_guests.filter(x=>x!==g);
+          logChange(me, "", "standaard lijst", "alleen nog per dag");
+        }
+      }
+      save(); closeSheet(); render();
+    };
+  } else {
+    openSheet(`<h3>Wie ben jij?</h3>
+      <p style="font-size:13px;color:var(--ink2);margin-top:-6px">Tik op je naam — je hoeft niets in te vullen:</p>
+      ${DATA.members.map(m=>`<button class="menuitem" data-claim="${esc(m)}"><span class="g">👤 ${esc(m)}</span></button>`).join("")}
+      ${(DATA.recurring_guests||[]).map(g=>`<button class="menuitem" data-claim="${esc(g.name)}"><span class="g">👤 ${esc(g.name)}</span></button>`).join("")}
+      <input type="text" id="newName" placeholder="Je naam…" autocomplete="off" style="margin-top:14px">
+      <label class="checkrow"><input type="checkbox" id="newRec" checked> meedoen op alle komende dagen</label>
+      <button class="cta" id="btnNew">Dat ben ik</button>`);
+    $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
+      b.onclick = ()=>{
+        me = b.dataset.claim; localStorage.setItem("bd_me", me);
+        closeSheet(); render(); toast("Hoi " + me + " 👋");
+      };
+    });
+    $("#btnNew").onclick = ()=>{
+      const n = $("#newName").value.trim();
+      if(!n){ toast("Vul je naam in"); return; }
+      if(DATA.members.includes(n) || (DATA.recurring_guests||[]).some(g=>g.name===n)){ toast("Die naam bestaat al"); return; }
+      me = n; localStorage.setItem("bd_me", n);
+      if($("#newRec").checked){
+        if(!DATA.recurring_guests) DATA.recurring_guests = [];
+        DATA.recurring_guests.push({name:n, since:today()});
+        logChange(n, "", "", "aangemeld voor alle komende dagen");
+        save();
+      }
+      closeSheet(); render(); toast("Hoi " + n + " 👋");
+    };
+  }
+}
+
+function openGuestSignup(){
+  openSheet(`<h3>Welkom!</h3>
+    <input type="text" id="gName" placeholder="Je naam" autocomplete="off">
+    <label class="checkrow"><input type="checkbox" id="gRec" checked> meedoen op alle komende dagen</label>
+    <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Reageer je nergens op de laatste dag? Dan verdwijn je weer van de lijst.</p>
+    <button class="cta" id="gOk">Aanmelden</button>`);
+  $("#gName").focus();
+  $("#gOk").onclick = ()=>{
+    const n = $("#gName").value.trim();
+    if(!n){ toast("Vul een naam in"); return; }
+    if(DATA.members.includes(n) || (DATA.recurring_guests||[]).some(g=>g.name===n)){ toast("Die naam bestaat al"); return; }
+    me = n; localStorage.setItem("bd_me", n);
+    if($("#gRec").checked){
+      if(!DATA.recurring_guests) DATA.recurring_guests = [];
+      DATA.recurring_guests.push({name:n, since:today()});
+      logChange(n, "", "", "aangemeld voor alle komende dagen");
+      save();
+    }
+    closeSheet(); render(); toast("Hoi " + n + " 👋");
+  };
+}
+$("#btnMe").onclick = openMeSheet;
+$("#btnMeAdd").onclick = openMeSheet;
+
+function openDateSheet(){
+  openSheet(`<h3>Extra datum toevoegen</h3>
+    <input type="date" id="dDate">
+    <input type="text" id="dTitle" placeholder="Titel (optioneel, bv. generale)">
+    <button class="cta" id="dOk">Toevoegen</button>`);
+  $("#dOk").onclick = ()=>{
+    const v = $("#dDate").value;
+    if(!v){ toast("Kies een datum"); return; }
+    day(v).title = $("#dTitle").value.trim();
+    logChange("—", v, "", "dag toegevoegd");
+    save(); closeSheet();
+    const el = document.querySelector(`[data-act="cycle"][data-date="${v}"]`);
+    if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+  };
+}
+
+function openTargetSheet(){
+  openSheet(`<h3>🎯 Optreden / doel</h3>
+    <input type="date" id="tDate" value="${DATA.target||""}">
+    <button class="cta" id="tOk">Instellen</button>
+    <button class="cta" id="tClear" style="background:#8e8e93;margin-top:10px">Target verwijderen</button>`);
+  $("#tOk").onclick = ()=>{
+    const v = $("#tDate").value;
+    if(!v){ toast("Kies een datum"); return; }
+    DATA.target = v;
+    if(!DATA.days[v]) DATA.days[v] = {title:"", st:{}, guests:[]};
+    logChange("—", v, DATA.target, "doel/optreden ingesteld");
+    save(); closeSheet();
+    const el = document.querySelector(`[data-act="cycle"][data-date="${v}"]`);
+    if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+  };
+  $("#tClear").onclick = ()=>{
+    if(DATA.target) logChange("—", DATA.target, "doel/optreden", "verwijderd");
+    DATA.target = ""; save(); closeSheet(); toast("Target verwijderd");
+  };
+}
+
+function openFullLog(){
+  const lines = DATA.log.map(l=>
+    `<div class="logline"><b>${esc(l.who)}</b> · ${esc(l.target)} · ${fmtDate(l.date)}<br>“${esc(l.from||"—")}” → “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
+  ).join("");
+  openSheet(`<h3>Volledige wijzigingenlog</h3>
+    <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Readonly · nieuwste eerst</p>
+    <div class="loglist">${lines || `<div class="empty">Nog geen wijzigingen</div>`}</div>
+    <button class="cta" id="flOk">Sluiten</button>`);
+  $("#flOk").onclick = closeSheet;
+}
+
+$("#fabAdd").onclick = openDateSheet;
+
+/* ---------- start ---------- */
+load();
+</script>
+</body>
+</html>
