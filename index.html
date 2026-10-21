@@ -44,7 +44,9 @@
     background:var(--card);border-radius:var(--radius);margin-bottom:14px;
     box-shadow:0 1px 3px rgba(0,0,0,.07);overflow:hidden;
   }
-  .dayhead{display:flex;align-items:center;gap:12px;padding:14px 16px 10px}
+  .dayhead{display:flex;align-items:center;gap:12px;padding:14px 16px 10px;cursor:pointer}
+  .daynotes{padding:2px 16px 10px;font-size:12.5px;color:var(--ink2)}
+  .daynotes b{color:var(--ink)}
   .dateblock{
     flex:none;width:52px;height:56px;border-radius:14px;text-align:center;
     background:linear-gradient(160deg,#eaf4ff,#dceaff);display:flex;flex-direction:column;
@@ -57,9 +59,7 @@
   .daytitle{font-size:17px;font-weight:650;letter-spacing:-.2px;display:flex;align-items:center;gap:6px}
   .daytitle .pen{opacity:.35;cursor:pointer}
   .daysub{font-size:12px;color:var(--ink2);margin-top:2px}
-  .badges{padding:0 16px 4px;display:flex;flex-wrap:wrap;gap:14px;font-size:12px;font-weight:600}
-  .badges .b{display:flex;align-items:center;gap:5px}
-  .badges .b i{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .badges{display:none}
   .chips{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 16px}
   .chip{
     display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
@@ -163,10 +163,6 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
   </button>
   <h1>Speleu?</h1>
-  <button class="iconbtn" id="btnMeAdd" title="Jezelf toevoegen" aria-label="Jezelf toevoegen">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 19c.7-3 2.8-4.6 5.5-4.6s4.8 1.6 5.5 4.6"/><path d="M17 7.5v6M14 10.5h6"/></svg>
-  </button>
-  <button class="avatar" id="btnMe" style="display:none"></button>
 </header>
 
 <main>
@@ -192,7 +188,7 @@
  * Laat SCRIPT_URL leeg → demomodus met localStorage (preview werkt meteen).
  */
 const CONFIG = {
-  SCRIPT_URL: "https://script.google.com/macros/s/AKfycbyb3juYzDPYYKV495h_z9Y5kdfueSfv8AZdtkj5Ke39BK_7ceM5jhIaoOfmm4wQyE-7sg/exec",
+  SCRIPT_URL: "https://script.google.com/macros/s/AKfycby80LtzoOzt6IOpU1SXmgiCTGfbndRtL4gRmF80bB9jn-0AwY5YCwnZfCec2xvus_F_eA/exec",
   MONOLISA_URL: "https://resubyrah.github.io/moly/monolisa/",
   MEMBERS: ["Frans", "Peter", "Patrick", "Wim", "Harrie"],  // vaste bandleden (aliases, zelf aanpasbaar)
   SATURDAYS: 10,                       // aantal komende zaterdagen
@@ -201,7 +197,8 @@ const CONFIG = {
 };
 /* ========================================= */
 
-const STATUS = ["ja","deels","misschien","nee"];   // tik op chip = doorlopen
+const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
+const VERSION = "1.2";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -329,8 +326,23 @@ async function pushCloud(){
     });
     if(r.ok){ dirty = false; setSync(true, "Gesynchroniseerd met de gedeelde map"); }
     else throw new Error();
-  }catch(e){ setSync(true, "Opslaan mislukt – lokaal bewaard, probeert het later opnieuw"); }
+  }catch(e){ syncFailedModal(); }
 }
+
+let syncModalOpen = false;
+function syncFailedModal(){
+  setSync(false, "Wijzigingen staan klaar om te synchroniseren");
+  if(syncModalOpen) return;
+  syncModalOpen = true;
+  openSheet(`<h3>⚠️ Opslaan mislukt</h3>
+    <p style="font-size:14px;color:var(--ink2)">De verbinding met de gedeelde map is mislukt. Je wijzigingen zijn veilig op dit apparaat bewaard en worden automatisch opnieuw verzonden.</p>
+    <button class="cta" id="sfOk">OK</button>`);
+  $("#sfOk").onclick = ()=>{ syncModalOpen = false; closeSheet(); };
+}
+
+// Niet-gesyncte wijzigingen later alsnog proberen: bij focus en elke 60 s
+window.addEventListener("focus", ()=>{ if(dirty) pushCloud(); });
+setInterval(()=>{ if(dirty) pushCloud(); }, 60000);
 
 /* ---------- render ---------- */
 function memberChip(dateStr, name, st, guest){
@@ -344,7 +356,6 @@ function chipRow(dateStr, d){
   DATA.members.forEach(m=>{ html += memberChip(dateStr, m, d.st[m]||"", false); });
   (DATA.recurring_guests||[]).forEach(g=>{ html += memberChip(dateStr, g.name, d.st[g.name]||"", false); });
   d.guests.forEach(g=>{ html += memberChip(dateStr, g.name, g.st||"", true); });
-  html += `<button class="addguest" data-act="addguest" data-date="${dateStr}">＋ iemand</button>`;
   return `<div class="chips">${html}</div>`;
 }
 function counts(d){
@@ -366,7 +377,7 @@ function dayCard(dateStr, past){
     cd = `<div class="countdown">nog<b>${diff>0? diff : 0}</b>${diff===1? "dag" : "dagen"}</div>`;
   }
   return `<div class="day${isTarget?" target":""}">
-    <div class="dayhead">
+    <div class="dayhead" data-act="title" data-date="${dateStr}">
       <div class="dateblock"><div class="dow">${DOWS[dt.getDay()]}</div><div class="dn">${dt.getDate()}</div><div class="mo">${MONTHS[dt.getMonth()]}</div></div>
       <div class="daytitlewrap">
         <div class="daytitle">${isTarget? '<span class="targetlabel">🎯 Optreden</span>' : ""} ${title}<span class="pen" data-act="title" data-date="${dateStr}">
@@ -376,18 +387,14 @@ function dayCard(dateStr, past){
     </div>
     <div class="badges">
       <span class="b"><i style="background:var(--ja)"></i>${c.ja} ja</span>
-      <span class="b"><i style="background:var(--deels)"></i>${c.deels} deels</span>
       <span class="b"><i style="background:var(--misschien)"></i>${c.misschien} misschien</span>
       <span class="b"><i style="background:var(--nee)"></i>${c.nee} nee</span>
     </div>
     ${chipRow(dateStr, d)}
+    ${Object.entries(d.notes||{}).filter(([k,v])=>v).map(([k,v])=>`<div class="daynotes">💬 <b>${esc(k)}:</b> ${esc(v)}</div>`).join("")}
   </div>`;
 }
 function render(){
-  const av = $("#btnMe");
-  if(me){ av.style.display="flex"; av.textContent = me.slice(0,2).toUpperCase(); $("#btnMeAdd").style.display="none"; }
-  else { av.style.display="none"; $("#btnMeAdd").style.display="flex"; }
-
   const sats = nextSaturdays(CONFIG.SATURDAYS);
   sats.forEach(s=>{ if(!DATA.days[s]) DATA.days[s]={title:"",st:{},guests:[]}; });
   if(DATA.target && !DATA.days[DATA.target]) DATA.days[DATA.target]={title:"",st:{},guests:[]};
@@ -409,9 +416,22 @@ document.body.addEventListener("click", e=>{
   const act = el.dataset.act, dateStr = el.dataset.date, name = el.dataset.name;
   if(act==="cycle"){
     const guest = el.dataset.guest==="1";
-    const cur = guest? ((day(dateStr).guests.find(g=>g.name===name)||{}).st||"") : (day(dateStr).st[name]||"");
-    const idx = STATUS.indexOf(cur);
-    setStatus(dateStr, name, idx < STATUS.length-1 ? STATUS[idx+1] : "", guest);
+    const doCycle = ()=>{
+      const cur = guest? ((day(dateStr).guests.find(g=>g.name===name)||{}).st||"") : (day(dateStr).st[name]||"");
+      const idx = STATUS.indexOf(cur);
+      setStatus(dateStr, name, idx < STATUS.length-1 ? STATUS[idx+1] : "", guest);
+    };
+    if(!me){ me = name; localStorage.setItem("bd_me", me); toast("Hoi " + me + " 👋"); doCycle(); }
+    else if(me===name){ doCycle(); }
+    else{
+      // op een andere naam getikt: ben je het zelf of wijzig je namens iemand?
+      openSheet(`<h3>Wie is dit?</h3>
+        <p style="font-size:14px;color:var(--ink2)">Je staat bekend als <b>${esc(me)}</b> en tikte op <b>${esc(name)}</b>.</p>
+        <button class="cta" id="id0">Wijzig namens ${esc(me)}</button>
+        <button class="cta" id="id1" style="margin-top:10px">Nee, ik ben ${esc(name)}</button>`);
+      $("#id0").onclick = ()=>{ closeSheet(); doCycle(); };
+      $("#id1").onclick = ()=>{ me = name; localStorage.setItem("bd_me", me); closeSheet(); doCycle(); };
+    }
   }
   else if(act==="rmguest"){ e.stopPropagation(); removeGuest(dateStr, name); }
   else if(act==="note"){ e.stopPropagation(); openNoteSheet(dateStr, name); }
@@ -433,7 +453,7 @@ function openNoteSheet(dateStr, name){
   if(!d.notes) d.notes = {};
   const cur = d.notes[name] || "";
   openSheet(`<h3>💬 ${esc(name)} · ${fmtDate(dateStr)}</h3>
-    <input type="text" id="nText" placeholder="Kleine opmerking (bv. 'vanaf 15:00', 'twijfelt nog')" value="${esc(cur)}" autocomplete="off">
+    <input type="text" id="nText" placeholder="Kleine opmerking (bv. 'vanaf 15:00', 'twijfelt nog')" value="${esc(cur)}" autocomplete="off" maxlength="60">
     <button class="cta" id="nOk">Opslaan</button>
     ${cur? `<button class="cta" id="nDel" style="background:#8e8e93;margin-top:10px">Opmerking wissen</button>` : ""}`);
   $("#nText").focus();
@@ -451,10 +471,10 @@ function openNoteSheet(dateStr, name){
 
 function openGuestSheet(dateStr){
   openSheet(`<h3>Iemand toevoegen voor ${fmtDate(dateStr)}</h3>
-    <input type="text" id="gName" placeholder="Naam" autocomplete="off">
+    <input type="text" id="gName" placeholder="Naam" autocomplete="off" maxlength="30">
     <p style="font-size:13px;color:var(--ink2);margin-top:-6px">En direct even de beschikbaarheid:</p>
     <div class="seg" id="gSeg">
-      <button data-v="ja">ja</button><button data-v="deels">deels</button>
+      <button data-v="ja">ja</button>
       <button data-v="misschien">misschien</button><button data-v="nee">nee</button>
     </div>
     <button class="cta" id="gOk">Toevoegen</button>`);
@@ -477,13 +497,15 @@ function openTitleSheet(dateStr){
   const cur = day(dateStr).title||"";
   const future = dateStr >= today();
   openSheet(`<h3>✎ ${fmtDate(dateStr)}</h3>
-    <input type="text" id="tName" placeholder="Titel (bv. generale)" value="${esc(cur)}" autocomplete="off">
+    <input type="text" id="tName" placeholder="Titel (bv. generale)" value="${esc(cur)}" autocomplete="off" maxlength="40">
     <button class="cta" id="tOk">Opslaan</button>
     <button class="cta" id="tLog" style="background:#8e8e93;margin-top:10px">🕘 Wijzigingenlog</button>
+    <button class="cta" id="tAdd" style="background:#8e8e93;margin-top:10px">＋ Iemand toevoegen</button>
     ${future? `<button class="cta" id="tDel" style="background:#ff3b30;margin-top:10px">Verwijder dag</button>` : ""}`);
   $("#tName").focus();
   $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); save(); closeSheet(); };
   $("#tLog").onclick = ()=> openLogSheet(dateStr);
+  $("#tAdd").onclick = ()=> openGuestSheet(dateStr);
   if($("#tDel")) $("#tDel").onclick = ()=>{
     if(confirm("Deze dag verwijderen uit Speleu?")){ delete DATA.days[dateStr]; save(); closeSheet(); }
   };
@@ -509,7 +531,8 @@ function openMenu(){
     <button class="menuitem" data-m="target"><span class="g">🎯 Optreden / doel instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
     <button class="menuitem" data-m="hist"><span class="g">🕘 Historie opvragen<span class="sub">Eerdere dagen (onderaan de lijst)</span></span></button>
     <button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>
-    <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🎵 Opnamen in de Mono Lisa app<span class="sub">Moly · muziekspeler</span></span></a>`;
+    <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🎵 Opnamen in de Mono Lisa app<span class="sub">Moly · muziekspeler</span></span></a>
+    <div style="text-align:center;font-size:11px;color:var(--ink2);padding-top:16px">Speleu? v${VERSION}</div>`;
   $("#ovMenu").classList.add("show");
 }
 $("#btnMenu").onclick = openMenu;
@@ -531,7 +554,7 @@ function openMeSheet(){
   if(isMember || isExtra){
     openSheet(`<h3>Jij bent ${esc(me)}</h3>
       <p style="font-size:13px;color:var(--ink2)">${isMember? "Je alias in de bandlijst — mag je zelf aanpassen:" : "Je naam — mag je zelf aanpassen:"}</p>
-      <input type="text" id="meName" value="${esc(me)}" autocomplete="off">
+      <input type="text" id="meName" value="${esc(me)}" autocomplete="off" maxlength="30">
       ${isMember? "" : `<label class="checkrow"><input type="checkbox" id="meRec" checked> meedoen op alle komende dagen</label>
       <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Uitgezet? Dan sta je er alleen nog op dagen waarop je je hebt opgegeven. Reageer je nergens op de laatste dag, dan verdwijn je van de lijst.</p>`}
       <button class="cta" id="meOk">Opslaan</button>`);
@@ -565,7 +588,7 @@ function openMeSheet(){
       <p style="font-size:13px;color:var(--ink2);margin-top:-6px">Tik op je naam — je hoeft niets in te vullen:</p>
       ${DATA.members.map(m=>`<button class="menuitem" data-claim="${esc(m)}"><span class="g">👤 ${esc(m)}</span></button>`).join("")}
       ${(DATA.recurring_guests||[]).map(g=>`<button class="menuitem" data-claim="${esc(g.name)}"><span class="g">👤 ${esc(g.name)}</span></button>`).join("")}
-      <input type="text" id="newName" placeholder="Je naam…" autocomplete="off" style="margin-top:14px">
+      <input type="text" id="newName" placeholder="Je naam…" autocomplete="off" maxlength="30" style="margin-top:14px">
       <label class="checkrow"><input type="checkbox" id="newRec" checked> meedoen op alle komende dagen</label>
       <button class="cta" id="btnNew">Dat ben ik</button>`);
     $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
@@ -592,7 +615,7 @@ function openMeSheet(){
 
 function openGuestSignup(){
   openSheet(`<h3>Welkom!</h3>
-    <input type="text" id="gName" placeholder="Je naam" autocomplete="off">
+    <input type="text" id="gName" placeholder="Je naam" autocomplete="off" maxlength="30">
     <label class="checkrow"><input type="checkbox" id="gRec" checked> meedoen op alle komende dagen</label>
     <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Reageer je nergens op de laatste dag? Dan verdwijn je weer van de lijst.</p>
     <button class="cta" id="gOk">Aanmelden</button>`);
@@ -611,9 +634,7 @@ function openGuestSignup(){
     closeSheet(); render(); toast("Hoi " + n + " 👋");
   };
 }
-$("#btnMe").onclick = openMeSheet;
-$("#btnMeAdd").onclick = openMeSheet;
-
+// naam/identiteit loopt via het ☰-menu ("Wie ben jij?")
 function openDateSheet(){
   openSheet(`<h3>Extra datum toevoegen</h3>
     <input type="date" id="dDate">
