@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.10";
+const VERSION = "1.11";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -487,6 +487,12 @@ function render(){
   av.textContent = (me||"").slice(0,2).toUpperCase();
 
   const sats = nextSaturdays(CONFIG.SATURDAYS);
+  // alle zaterdagen tot aan het target meenemen (bv. bij optreden verder weg)
+  if(DATA.target){
+    let d = new Date(); d.setHours(12,0,0,0);
+    while(d.getDay()!==6) d.setDate(d.getDate()+1);
+    while(iso(d) <= DATA.target){ if(!sats.includes(iso(d))) sats.push(iso(d)); d.setDate(d.getDate()+7); }
+  }
   sats.forEach(s=>{ if(!DATA.days[s]) DATA.days[s]={title:"",st:{},guests:[]}; });
   if(DATA.target && !DATA.days[DATA.target]) DATA.days[DATA.target]={title:"",st:{},guests:[]};
 
@@ -676,7 +682,10 @@ async function fetchLog(){
   if(CONFIG.SCRIPT_URL){
     try{
       const r = await fetch(CONFIG.SCRIPT_URL + "?log=1&t=" + Date.now());
-      if(r.ok){ const env = await r.json(); if(env && Array.isArray(env.log)){ logCache = env.log; return logCache; } }
+      if(r.ok){ const env = await r.json(); if(env && Array.isArray(env.log)){
+        logCache = env.log.sort((a,b)=> String(b.t).localeCompare(String(a.t)));   // nieuwste eerst
+        return logCache;
+      } }
     }catch(e){}
   }
   // offline: wat we lokaal nog niet verzonden hebben
@@ -849,7 +858,7 @@ function openFullLog(){
   $("#flOk").onclick = closeSheet;
   fetchLog().then(log=>{
     const lines = log.map(l=>
-      `<div class="logline"><b>${esc(l.who)}</b> · ${esc(l.target)} · ${fmtDate(l.date)}<br>“${esc(l.from||"—")}” → “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
+      `<div class="logline"><b>${esc(l.who)}</b> · ${esc(l.target)}${l.date? " · "+fmtDate(l.date) : ""}<br>“${esc(l.from||"—")}” → “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
     ).join("");
     const el = $("#loglist"); if(el) el.innerHTML = lines || `<div class="empty">Nog geen wijzigingen</div>`;
   });
