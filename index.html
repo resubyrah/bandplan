@@ -207,7 +207,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.6";
+const VERSION = "1.7";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -389,7 +389,9 @@ async function pull(){
 
 // sync-hartslag: niet-gesyncte wijzigingen opnieuw sturen, anders verversen
 window.addEventListener("focus", ()=>{ if(dirty) pushCloud(); else pull(); });
-setInterval(()=>{ if(dirty) pushCloud(); else pull(); }, 60000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && !dirty) pull(); });
+// actief pollen zolang het scherm open is: elke 15 s verse data van anderen
+setInterval(()=>{ if(document.hidden) return; if(dirty) pushCloud(); else pull(); }, 15000);
 
 let syncModalOpen = false;
 function syncFailedModal(){
