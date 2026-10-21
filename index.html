@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.9";
+const VERSION = "1.10";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -289,7 +289,7 @@ function removeGuest(dateStr, name){
 function save(){
   localStorage.setItem("bd_data", JSON.stringify(DATA));
   dirty = true; prune(); render();
-  pushCloud();
+  scheduleSync();          // wacht tot de gebruiker 5 s niets doet, sync dan alles in één keer
 }
 function prune(){
   const cut = new Date(); cut.setHours(12,0,0,0);
@@ -329,7 +329,7 @@ async function load(){
         const env = await r.json();
         if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
       }
-      setSync(true, dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map");
+      setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
     }catch(e){ setSync(false, "Cloud niet bereikbaar – lokale gegevens"); }
   } else {
     setSync(false, "Demomodus: opgeslagen op dit apparaat");
@@ -341,6 +341,17 @@ function setSync(ok, txt){
   const b=$("#syncbar"); b.classList.add("show");
   $("#synctext").textContent = txt + (!ok && !CONFIG.SCRIPT_URL? " · vul SCRIPT_URL in CONFIG voor cloud" : "");
   $("#syncdot").className = "dot" + (ok? " ok":"");
+}
+
+let lastSyncT = null;      // tijdstip laatste geslaagde cloud-sync
+function syncTimeTxt(){
+  return lastSyncT? " · laatste sync " + lastSyncT.toLocaleTimeString("nl-NL", {hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "";
+}
+let syncTimer = null;
+function scheduleSync(){   // debounce: pas syncen als de gebruiker 5 s stil is
+  setSync(true, "Wijzigingen bewaard – syncen als je klaar bent" + syncTimeTxt());
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(()=>{ if(dirty) pushCloud(); }, 5000);
 }
 
 async function pushCloud(){
@@ -355,7 +366,8 @@ async function pushCloud(){
     const res = await r.json();
     if(res && res.ok){
       dirty = false; pendingOps = []; serverRev = res.rev||0; pendingLog = [];
-      setSync(true, "Gesynchroniseerd met de gedeelde map");
+      lastSyncT = new Date();
+      setSync(true, "Gesynchroniseerd met de gedeelde map" + syncTimeTxt());
     }
     else if(res && res.conflict){
       // Iemand anders heeft ondertussen opgeslagen: verse data ophalen,
@@ -369,7 +381,8 @@ async function pushCloud(){
       });
       const res2 = await r2.json();
       if(res2 && res2.ok){ dirty = false; pendingOps = []; serverRev = res2.rev||0; pendingLog = [];
-        setSync(true, "Gesynchroniseerd met de gedeelde map"); render(); return; }
+        lastSyncT = new Date();
+        setSync(true, "Gesynchroniseerd met de gedeelde map" + syncTimeTxt()); render(); return; }
       throw new Error();
     }
     else throw new Error();
@@ -399,7 +412,7 @@ setInterval(()=>{ if(document.hidden) return; if(dirty) pushCloud(); else pull()
 
 let syncModalOpen = false;
 function syncFailedModal(){
-  setSync(false, "Wijzigingen staan klaar om te synchroniseren · probeert over 10 s opnieuw");
+  setSync(false, "Sync mislukt – bewaard op dit apparaat, probeert over 10 s opnieuw" + syncTimeTxt());
   retrySoon();
     if(syncModalOpen) return;
   syncModalOpen = true;
