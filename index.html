@@ -207,7 +207,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.7";
+const VERSION = "1.8";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -335,7 +335,7 @@ async function load(){
 
 function setSync(ok, txt){
   const b=$("#syncbar"); b.classList.add("show");
-  $("#synctext").textContent = txt + (ok? "" : " · vul SCRIPT_URL in CONFIG voor cloud");
+  $("#synctext").textContent = txt + (!ok && !CONFIG.SCRIPT_URL? " · vul SCRIPT_URL in CONFIG voor cloud" : "");
   $("#syncdot").className = "dot" + (ok? " ok":"");
 }
 
@@ -391,17 +391,23 @@ async function pull(){
 window.addEventListener("focus", ()=>{ if(dirty) pushCloud(); else pull(); });
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && !dirty) pull(); });
 // actief pollen zolang het scherm open is: elke 15 s verse data van anderen
-setInterval(()=>{ if(document.hidden) return; if(dirty) pushCloud(); else pull(); }, 15000);
+setInterval(()=>{ if(document.hidden) return; if(dirty) pushCloud(); else pull(); }, 10000);
 
 let syncModalOpen = false;
 function syncFailedModal(){
-  setSync(false, "Wijzigingen staan klaar om te synchroniseren");
-  if(syncModalOpen) return;
+  setSync(false, "Wijzigingen staan klaar om te synchroniseren · probeert over 10 s opnieuw");
+  retrySoon();
+    if(syncModalOpen) return;
   syncModalOpen = true;
   openSheet(`<h3>⚠️ Opslaan mislukt</h3>
-    <p style="font-size:14px;color:var(--ink2)">De verbinding met de gedeelde map is mislukt. Je wijzigingen zijn veilig op dit apparaat bewaard en worden automatisch opnieuw verzonden.</p>
+    <p style="font-size:14px;color:var(--ink2)">De verbinding met de gedeelde map is mislukt. Je wijzigingen zijn veilig op dit apparaat bewaard en worden over 10 seconden automatisch opnieuw verzonden.</p>
     <button class="cta" id="sfOk">OK</button>`);
   $("#sfOk").onclick = ()=>{ syncModalOpen = false; closeSheet(); };
+}
+// mislukte sync direct over 10 s opnieuw proberen
+function retrySoon(){
+  clearTimeout(retrySoon._h);
+  retrySoon._h = setTimeout(()=>{ if(dirty) pushCloud(); }, 10000);
 }
 
 // Niet-gesyncte wijzigingen later alsnog proberen: bij focus en elke 60 s
