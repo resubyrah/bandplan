@@ -207,7 +207,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.8";
+const VERSION = "1.9";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -256,12 +256,14 @@ function setStatus(dateStr, name, st, isGuest){
   logChange(name, dateStr, old, st);
   save();
 }
+let pendingLog = [];       // nog niet verzonden logregels
 function logChange(target, dateStr, from, to){
-  DATA.log.unshift({
+  const entry = {
     t: new Date().toISOString().replace("T"," ").slice(0,16),
     who: me || ("apparaat-" + DEVID), target, date: dateStr, from, to
-  });
-  DATA.log = DATA.log.slice(0, CONFIG.LOG_MAX);   // log blijft begrensd en is readonly in de UI
+  };
+  pendingLog.unshift(entry);
+  pendingLog = pendingLog.slice(0, CONFIG.LOG_MAX);
 }
 
 function addGuest(dateStr, name){
@@ -291,7 +293,6 @@ function prune(){
   cut.setMonth(cut.getMonth() - CONFIG.HISTORY_MONTHS);
   const cutStr = iso(cut);
   Object.keys(DATA.days).forEach(dk=>{ if(dk < cutStr) delete DATA.days[dk]; });
-  DATA.log = DATA.log.slice(0, CONFIG.LOG_MAX);
   // Extra spelers die op de meest recente afgelopen dag niet gereageerd
   // hebben, verdwijnen weer uit de standaardlijst.
   const t = today();
@@ -346,11 +347,11 @@ async function pushCloud(){
     const r = await fetch(CONFIG.SCRIPT_URL, {
       method:"POST",
       headers:{"Content-Type":"text/plain"},   // text/plain → geen CORS-preflight
-      body: JSON.stringify({rev: serverRev, data: DATA})
+      body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog})
     });
     const res = await r.json();
     if(res && res.ok){
-      dirty = false; pendingOps = []; serverRev = res.rev||0;
+      dirty = false; pendingOps = []; serverRev = res.rev||0; pendingLog = [];
       setSync(true, "Gesynchroniseerd met de gedeelde map");
     }
     else if(res && res.conflict){
@@ -361,10 +362,10 @@ async function pushCloud(){
       logChange("—", "", "conflict", "andere wijzigingen samengevoegd");
       const r2 = await fetch(CONFIG.SCRIPT_URL, {
         method:"POST", headers:{"Content-Type":"text/plain"},
-        body: JSON.stringify({rev: serverRev, data: DATA})
+        body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog})
       });
       const res2 = await r2.json();
-      if(res2 && res2.ok){ dirty = false; pendingOps = []; serverRev = res2.rev||0;
+      if(res2 && res2.ok){ dirty = false; pendingOps = []; serverRev = res2.rev||0; pendingLog = [];
         setSync(true, "Gesynchroniseerd met de gedeelde map"); render(); return; }
       throw new Error();
     }
@@ -653,15 +654,32 @@ function openTitleEditSheet(dateStr){
   $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); queueOp({t:"title", d:dateStr, v:day(dateStr).title}); save(); closeSheet(); };
 }
 
+// Logregels pas ophalen als de log wordt opgevraagd (niet bij elke sync)
+let logCache = [];
+async function fetchLog(){
+  if(CONFIG.SCRIPT_URL){
+    try{
+      const r = await fetch(CONFIG.SCRIPT_URL + "?log=1&t=" + Date.now());
+      if(r.ok){ const env = await r.json(); if(env && Array.isArray(env.log)){ logCache = env.log; return logCache; } }
+    }catch(e){}
+  }
+  // offline: wat we lokaal nog niet verzonden hebben
+  return pendingLog;
+}
+
 function openLogSheet(dateStr){
-  const lines = DATA.log.filter(l=>l.date===dateStr).map(l=>
-    `<div class="logline"><b>${esc(l.who)}</b> zette <b>${esc(l.target)}</b> van “${esc(l.from||"—")}” naar “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
-  ).join("");
   openSheet(`<h3>Wijzigingenlog · ${fmtDate(dateStr)}</h3>
     <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Readonly – alleen geregistreerde wijzigingen</p>
-    <div class="loglist">${lines || `<div class="empty">Nog geen wijzigingen</div>`}</div>
+    <div class="loglist" id="loglist"><div class="empty">Laden…</div></div>
     <button class="cta" id="lOk">Sluiten</button>`);
   $("#lOk").onclick = closeSheet;
+  fetchLog().then(log=>{
+    const lines = log.filter(l=>l.date===dateStr).map(l=>
+      `<div class="logline"><b>${esc(l.who)}</b> zette <b>${esc(l.target)}</b> van “${esc(l.from||"—")}” naar “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
+    ).join("");
+    const el = $("#loglist"); if(el) el.innerHTML = lines || `<div class="empty">Nog geen wijzigingen</div>`;
+  });
+}
 }
 
 /* ---------- menu ---------- */
@@ -809,14 +827,17 @@ function openTargetSheet(){
 }
 
 function openFullLog(){
-  const lines = DATA.log.map(l=>
-    `<div class="logline"><b>${esc(l.who)}</b> · ${esc(l.target)} · ${fmtDate(l.date)}<br>“${esc(l.from||"—")}” → “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
-  ).join("");
   openSheet(`<h3>Volledige wijzigingenlog</h3>
     <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Readonly · nieuwste eerst</p>
-    <div class="loglist">${lines || `<div class="empty">Nog geen wijzigingen</div>`}</div>
+    <div class="loglist" id="loglist"><div class="empty">Laden…</div></div>
     <button class="cta" id="flOk">Sluiten</button>`);
   $("#flOk").onclick = closeSheet;
+  fetchLog().then(log=>{
+    const lines = log.map(l=>
+      `<div class="logline"><b>${esc(l.who)}</b> · ${esc(l.target)} · ${fmtDate(l.date)}<br>“${esc(l.from||"—")}” → “${esc(l.to||"—")}”<div class="t">${esc(l.t)}</div></div>`
+    ).join("");
+    const el = $("#loglist"); if(el) el.innerHTML = lines || `<div class="empty">Nog geen wijzigingen</div>`;
+  });
 }
 
 $("#fabAdd").onclick = openDateSheet;
