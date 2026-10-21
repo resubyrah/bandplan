@@ -44,9 +44,11 @@
     background:var(--card);border-radius:var(--radius);margin-bottom:14px;
     box-shadow:0 1px 3px rgba(0,0,0,.07);overflow:hidden;
   }
-  .dayhead{display:flex;align-items:center;gap:12px;padding:14px 16px 10px;cursor:pointer}
+  .dayhead{display:flex;align-items:center;gap:12px;padding:14px 16px 10px;cursor:pointer;flex-wrap:wrap}
   .daynotes{padding:2px 16px 10px;font-size:12.5px;color:var(--ink2)}
   .daynotes b{color:var(--ink)}
+  .notedel{margin-left:8px;cursor:pointer;color:var(--ink2);font-size:12px;padding:0 4px}
+  .notedel:hover{color:#ff3b30}
   .dateblock{
     flex:none;width:52px;height:56px;border-radius:14px;text-align:center;
     background:linear-gradient(160deg,#eaf4ff,#dceaff);display:flex;flex-direction:column;
@@ -97,6 +99,8 @@
     background:var(--deels);border-radius:999px;padding:4px 10px;letter-spacing:.4px;text-transform:uppercase;
   }
   .countdown{font-size:12px;font-weight:700;color:var(--deels);margin-left:auto;text-align:right;line-height:1.35}
+  .dayballoon{font-size:17px;cursor:pointer;opacity:.45;padding:2px 0 2px 8px;flex:none}
+  .dayballoon:hover{opacity:1}
   .countdown b{display:block;font-size:16px}
   .row-btns{display:flex;justify-content:space-between;align-items:center;padding:0 16px 14px}
   .mini{border:none;background:none;color:var(--ink2);font-size:12px;cursor:pointer;padding:6px}
@@ -167,6 +171,7 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
   </button>
   <h1>Speleu?</h1>
+  <button class="avatar" id="btnMe" title="Wie ben jij?" style="display:none"></button>
 </header>
 
 <main>
@@ -202,7 +207,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.3";
+const VERSION = "1.6";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -402,14 +407,15 @@ function syncFailedModal(){
 /* ---------- render ---------- */
 function memberChip(dateStr, name, st, guest){
   const x = guest? `<span class="x" data-act="rmguest" data-date="${dateStr}" data-name="${esc(name)}">✕</span>` : "";
-  const note = (day(dateStr).notes||{})[name] || "";
   return `<span class="chip${guest?" guest":""}" data-st="${st}" data-act="cycle" data-date="${dateStr}" data-name="${esc(name)}" data-guest="${guest?1:0}">
-    <span class="st"></span>${esc(name)}<span class="chipnote${note? "" : " empty"}" data-act="note" data-date="${dateStr}" data-name="${esc(name)}" title="${esc(note)}">💬</span>${x}</span>`;
+    <span class="st"></span>${esc(name)}${x}</span>`;
 }
 function chipRow(dateStr, d){
   let html = "";
   DATA.members.forEach(m=>{ html += memberChip(dateStr, m, d.st[m]||"", false); });
-  (DATA.recurring_guests||[]).forEach(g=>{ html += memberChip(dateStr, g.name, d.st[g.name]||"", false); });
+  // Terugkerende gasten: alleen zichtbaar voor iedereen als ze zijn ingevuld;
+  // de gast zelf ziet zijn eigen chip op alle dagen (om in te tikken)
+  (DATA.recurring_guests||[]).forEach(g=>{ if(d.st[g.name] || g.name===me) html += memberChip(dateStr, g.name, d.st[g.name]||"", false); });
   d.guests.forEach(g=>{ html += memberChip(dateStr, g.name, g.st||"", true); });
   return `<div class="chips">${html}</div>`;
 }
@@ -439,6 +445,7 @@ function dayCard(dateStr, past){
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4L8 20l-5 1 1-5z"/></svg></span></div>
         <div class="daysub">${fmtDate(dateStr)}${isSat?" · zaterdag":""}</div>
       </div>${cd}
+      <span class="dayballoon" data-act="daynote" data-date="${dateStr}" title="Opmerking voor deze dag">💬</span>
     </div>
     <div class="badges">
       <span class="b"><i style="background:var(--ja)"></i>${c.ja} ja</span>
@@ -446,10 +453,14 @@ function dayCard(dateStr, past){
       <span class="b"><i style="background:var(--nee)"></i>${c.nee} nee</span>
     </div>
     ${chipRow(dateStr, d)}
-    ${Object.entries(d.notes||{}).filter(([k,v])=>v).map(([k,v])=>`<div class="daynotes">💬 <b>${esc(k)}:</b> ${esc(v)}</div>`).join("")}
+    ${Object.entries(d.notes||{}).filter(([k,v])=>v).map(([k,v])=>`<div class="daynotes">💬 <b>${esc(k)}:</b> ${esc(v)}${k===me? `<span class="notedel" data-act="delnote" data-date="${dateStr}" data-name="${esc(k)}">✕</span>` : ""}</div>`).join("")}
   </div>`;
 }
 function render(){
+  const av = $("#btnMe");
+  av.style.display = me? "flex" : "none";
+  av.textContent = (me||"").slice(0,2).toUpperCase();
+
   const sats = nextSaturdays(CONFIG.SATURDAYS);
   sats.forEach(s=>{ if(!DATA.days[s]) DATA.days[s]={title:"",st:{},guests:[]}; });
   if(DATA.target && !DATA.days[DATA.target]) DATA.days[DATA.target]={title:"",st:{},guests:[]};
@@ -462,6 +473,33 @@ function render(){
   $("#upcoming").innerHTML = up.map(dk=>dayCard(dk,false)).join("");
   $("#past").innerHTML = pastD.length?
     `<div class="sectionlabel">🗓 Historie</div>` + pastD.slice().reverse().map(dk=>dayCard(dk,true)).join("") : "";
+  balanceChips();
+}
+
+// Chips gelijkmatig in rijen vanaf rechts: past alles op één rij → één rij;
+// anders rijen vullen die per rij max één verschil hebben (5 → 3+2, 8 → 4+4)
+function balanceChips(){
+  document.querySelectorAll(".chips").forEach(box=>{
+    const chips = [...box.querySelectorAll(":scope > .chip")];
+    if(chips.length < 4) return;
+    const gap = 8, W = box.clientWidth - 32;   // inhoudsbreedte (padding 16+16)
+    let k = 0, tot = 0;
+    for(const c of chips){
+      const w = c.offsetWidth + gap;
+      if(tot + w <= W + 1){ tot += w; k++; } else break;
+    }
+    if(!k || k >= chips.length) return;        // past op één rij
+    const rows = Math.ceil(chips.length / k);
+    const per = Math.ceil(chips.length / rows);
+    chips.forEach(c=>c.remove());
+    for(let i=0; i<chips.length; i+=per){
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;width:100%";
+      if(i) row.style.marginTop = "8px";
+      chips.slice(i, i+per).forEach(c=>row.appendChild(c));
+      box.appendChild(row);
+    }
+  });
 }
 
 /* ---------- interactie ---------- */
@@ -489,7 +527,14 @@ document.body.addEventListener("click", e=>{
     }
   }
   else if(act==="rmguest"){ e.stopPropagation(); removeGuest(dateStr, name); }
-  else if(act==="note"){ e.stopPropagation(); openNoteSheet(dateStr, name); }
+  else if(act==="delnote"){
+    const d = day(dateStr);
+    if(d.notes) delete d.notes[name];
+    logChange(name, dateStr, "", "opmerking gewist");
+    queueOp({t:"note", d:dateStr, n:name, v:""});
+    save();
+  }
+  else if(act==="daynote"){ if(!me) openMeSheet(); else openNoteSheet(dateStr, me); }
   else if(act==="addguest"){ openGuestSheet(dateStr); }
   else if(act==="title"){ openTitleSheet(dateStr); }
   else if(act==="log"){ openLogSheet(dateStr); }
@@ -574,23 +619,30 @@ function openRemovePersonSheet(dateStr){
 }
 
 function openTitleSheet(dateStr){
-  const cur = day(dateStr).title||"";
   const future = dateStr >= today();
-  openSheet(`<h3>✎ ${fmtDate(dateStr)}</h3>
-    <input type="text" id="tName" placeholder="Titel (bv. generale)" value="${esc(cur)}" autocomplete="off" maxlength="40">
-    <button class="cta" id="tOk">Opslaan</button>
-    <button class="cta" id="tLog" style="background:#8e8e93;margin-top:10px">🕘 Wijzigingenlog</button>
-    <button class="cta" id="tAdd" style="background:#8e8e93;margin-top:10px">＋ Iemand toevoegen</button>
-    <button class="cta" id="tRm" style="background:#8e8e93;margin-top:10px">➖ Iemand wissen op deze dag</button>
-    ${future? `<button class="cta" id="tDel" style="background:#ff3b30;margin-top:10px">Verwijder dag</button>` : ""}`);
-  $("#tName").focus();
-  $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); queueOp({t:"title", d:dateStr, v:day(dateStr).title}); save(); closeSheet(); };
-  $("#tLog").onclick = ()=> openLogSheet(dateStr);
-  $("#tAdd").onclick = ()=> openGuestSheet(dateStr);
-  $("#tRm").onclick = ()=> openRemovePersonSheet(dateStr);
-  if($("#tDel")) $("#tDel").onclick = ()=>{
+  openSheet(`<h3>${fmtDate(dateStr)}</h3>
+    <button class="menuitem" data-do="t"><span class="g">✎ Titel wijzigen</span></button>
+    <button class="menuitem" data-do="log"><span class="g">🕘 Wijzigingenlog</span></button>
+    <button class="menuitem" data-do="add"><span class="g">＋ Iemand toevoegen</span></button>
+    <button class="menuitem" data-do="rm"><span class="g">➖ Iemand wissen op deze dag</span></button>
+    ${future? `<button class="menuitem" data-do="del"><span class="g" style="color:#ff3b30">🗑 Verwijder dag</span></button>` : ""}`);
+  const q = s=>$("#shSheet").querySelector(s);
+  q('[data-do="t"]').onclick = ()=> openTitleEditSheet(dateStr);
+  q('[data-do="log"]').onclick = ()=> openLogSheet(dateStr);
+  q('[data-do="add"]').onclick = ()=> openGuestSheet(dateStr);
+  q('[data-do="rm"]').onclick = ()=> openRemovePersonSheet(dateStr);
+  if(q('[data-do="del"]')) q('[data-do="del"]').onclick = ()=>{
     if(confirm("Deze dag verwijderen uit Speleu?")){ delete DATA.days[dateStr]; queueOp({t:"delday", d:dateStr}); save(); closeSheet(); }
   };
+}
+
+function openTitleEditSheet(dateStr){
+  const cur = day(dateStr).title||"";
+  openSheet(`<h3>Titel voor ${fmtDate(dateStr)}</h3>
+    <input type="text" id="tName" placeholder="bv. generale" value="${esc(cur)}" autocomplete="off" maxlength="40">
+    <button class="cta" id="tOk">Opslaan</button>`);
+  $("#tName").focus();
+  $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); queueOp({t:"title", d:dateStr, v:day(dateStr).title}); save(); closeSheet(); };
 }
 
 function openLogSheet(dateStr){
@@ -618,6 +670,7 @@ function openMenu(){
   $("#ovMenu").classList.add("show");
 }
 $("#btnMenu").onclick = openMenu;
+$("#btnMe").onclick = openMeSheet;
 $("#ovMenu").addEventListener("click", e=>{
   if(e.target.id==="ovMenu"){ $("#ovMenu").classList.remove("show"); return; }
   const b = e.target.closest("[data-m]"); if(!b) return;
@@ -638,8 +691,7 @@ function openMeSheet(){
       <p style="font-size:13px;color:var(--ink2)">${isMember? "Je alias in de bandlijst — mag je zelf aanpassen:" : "Je naam — mag je zelf aanpassen:"}</p>
       <input type="text" id="meName" value="${esc(me)}" autocomplete="off" maxlength="30">
       <button class="mini" id="meClear" style="margin-top:8px">✕ naam wissen</button>
-      ${isMember? "" : `<label class="checkrow"><input type="checkbox" id="meRec" checked> meedoen op alle komende dagen</label>
-      <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Uitgezet? Dan sta je er alleen nog op dagen waarop je je hebt opgegeven. Reageer je nergens op de laatste dag, dan verdwijn je van de lijst.</p>`}
+      ${isMember? "" : `<p style="font-size:12px;color:var(--ink2);margin-top:-4px">Als gast zie je je eigen chip op alle dagen om in te tikken. De band ziet je pas op dagen waarop je iets hebt ingevuld.</p>`}
       <button class="cta" id="meOk">Opslaan</button>`);
     $("#meName").focus();
     $("#meClear").onclick = ()=>{ $("#meName").value = ""; $("#meName").focus(); };
@@ -656,24 +708,19 @@ function openMeSheet(){
           });
           logChange(n, "", me, "naam gewijzigd");
         }
-        me = n; localStorage.setItem("bd_me", n);
-      }
-      if(!isMember){
-        const g = DATA.recurring_guests.find(g=>g.name===me);
-        if(g && !$("#meRec").checked){
-          DATA.recurring_guests = DATA.recurring_guests.filter(x=>x!==g);
-          logChange(me, "", "standaard lijst", "alleen nog per dag");
-        }
+      me = n; localStorage.setItem("bd_me", n);
       }
       save(); closeSheet(); render();
     };
   } else {
     openSheet(`<h3>Wie ben jij?</h3>
-      <p style="font-size:13px;color:var(--ink2);margin-top:-6px">Tik op je naam — je hoeft niets in te vullen:</p>
-      ${DATA.members.map(m=>`<button class="menuitem" data-claim="${esc(m)}"><span class="g">👤 ${esc(m)}</span></button>`).join("")}
-      ${(DATA.recurring_guests||[]).map(g=>`<button class="menuitem" data-claim="${esc(g.name)}"><span class="g">👤 ${esc(g.name)}</span></button>`).join("")}
-      <input type="text" id="newName" placeholder="Je naam…" autocomplete="off" maxlength="30" style="margin-top:14px">
-      <label class="checkrow"><input type="checkbox" id="newRec" checked> meedoen op alle komende dagen</label>
+      <div class="chips" style="justify-content:flex-start;padding:6px 0 2px">
+        ${DATA.members.map(m=>`<span class="chip" data-claim="${esc(m)}"><span class="st"></span>${esc(m)}</span>`).join("")}
+        ${(DATA.recurring_guests||[]).map(g=>`<span class="chip" data-claim="${esc(g.name)}"><span class="st"></span>${esc(g.name)}</span>`).join("")}
+        <span class="chip" id="chipNew"><span class="st"></span><input type="text" id="newName" placeholder="naam…" maxlength="30" style="border:none;outline:none;font:inherit;width:90px;background:none;padding:0"></span>
+      </div>
+      <label class="checkrow" style="margin-top:10px"><input type="checkbox" id="newRec"> meedoen op alle komende dagen</label>
+      <p style="font-size:12px;color:var(--ink2);margin-top:-2px">Vink aan? Dan zie je zelf je chip op alle dagen om in te tikken. Anderen zien je pas als je ergens op getikt hebt.</p>
       <button class="cta" id="btnNew">Dat ben ik</button>`);
     $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
       b.onclick = ()=>{
@@ -700,8 +747,7 @@ function openMeSheet(){
 function openGuestSignup(){
   openSheet(`<h3>Welkom!</h3>
     <input type="text" id="gName" placeholder="Je naam" autocomplete="off" maxlength="30">
-    <label class="checkrow"><input type="checkbox" id="gRec" checked> meedoen op alle komende dagen</label>
-    <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Reageer je nergens op de laatste dag? Dan verdwijn je weer van de lijst.</p>
+    <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Je chip staat daarna op alle dagen klaar om in te tikken. De band ziet je pas op dagen waarop je iets hebt ingevuld.</p>
     <button class="cta" id="gOk">Aanmelden</button>`);
   $("#gName").focus();
   $("#gOk").onclick = ()=>{
@@ -709,12 +755,10 @@ function openGuestSignup(){
     if(!n){ toast("Vul een naam in"); return; }
     if(DATA.members.includes(n) || (DATA.recurring_guests||[]).some(g=>g.name===n)){ toast("Die naam bestaat al"); return; }
     me = n; localStorage.setItem("bd_me", n);
-    if($("#gRec").checked){
-      if(!DATA.recurring_guests) DATA.recurring_guests = [];
-      DATA.recurring_guests.push({name:n, since:today()});
-      logChange(n, "", "", "aangemeld voor alle komende dagen");
-      save();
-    }
+    if(!DATA.recurring_guests) DATA.recurring_guests = [];
+    DATA.recurring_guests.push({name:n, since:today()});
+    logChange(n, "", "", "aangemeld");
+    save();
     closeSheet(); render();
   };
 }
