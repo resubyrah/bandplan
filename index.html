@@ -60,11 +60,12 @@
   .daytitle .pen{opacity:.35;cursor:pointer}
   .daysub{font-size:12px;color:var(--ink2);margin-top:2px}
   .badges{display:none}
-  .chips{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 16px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 16px;justify-content:flex-end}
   .chip{
     display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
     font-size:14px;font-weight:600;cursor:pointer;border:1.5px solid rgba(0,0,0,.14);
     background:#fff;color:var(--ink);user-select:none;transition:transform .08s;
+    position:relative;
   }
   .chip:active{transform:scale(.94)}
   .chip .st{width:10px;height:10px;border-radius:50%;background:#d1d1d6;flex:none}
@@ -78,7 +79,10 @@
   .chip[data-st="nee"] .st{background:var(--nee)}
   .chip.guest{border-style:solid}
   .chip .x{opacity:.5;font-size:12px}
-  .chip .chipnote{font-size:11px;opacity:.55;cursor:pointer;padding:0 1px}
+  .chip .chipnote{position:absolute;top:-7px;right:-5px;font-size:12px;cursor:pointer;
+    background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:50%;width:18px;height:18px;
+    display:flex;align-items:center;justify-content:center;line-height:1}
+  .chip .chipnote.empty{opacity:.35}
   .chip .chipnote:hover{opacity:1}
   .addguest{
     border:none;background:none;color:var(--deels);font-size:13px;font-weight:600;
@@ -198,7 +202,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.2";
+const VERSION = "1.3";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -208,6 +212,18 @@ let me = localStorage.getItem("bd_me") || "";
 let DEVID = localStorage.getItem("bd_devid");
 if(!DEVID){ DEVID = Math.random().toString(36).slice(2,8); localStorage.setItem("bd_devid", DEVID); }
 let dirty = false;          // lokale wijzigingen nog niet naar de cloud
+let serverRev = 0;           // revisie (Drive-timestamp) van de data zoals we die laast zagen
+let pendingOps = [];         // eigen wijzigingen sinds laatste geslaagde sync (voor merge)
+
+function queueOp(op){ pendingOps.push(op); }
+function applyOp(o){
+  if(o.t==="st"){ const d=day(o.d); if(o.g){ const g=d.guests.find(g=>g.name===o.n); if(g) g.st=o.s; } else { if(o.s) d.st[o.n]=o.s; else delete d.st[o.n]; } }
+  else if(o.t==="title"){ day(o.d).title = o.v; }
+  else if(o.t==="note"){ const d=day(o.d); if(!d.notes) d.notes={}; if(o.v) d.notes[o.n]=o.v; else delete d.notes[o.n]; }
+  else if(o.t==="addg"){ const d=day(o.d); if(!d.guests.some(g=>g.name===o.n)) d.guests.push({name:o.n, st:o.s||""}); }
+  else if(o.t==="rmg"){ const d=day(o.d); d.guests = d.guests.filter(g=>g.name!==o.n); }
+  else if(o.t==="delday"){ delete DATA.days[o.d]; }
+}
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -231,6 +247,7 @@ function setStatus(dateStr, name, st, isGuest){
   const old = (isGuest? (d.guests.find(g=>g.name===name)||{}).st : d.st[name]) || "";
   if(isGuest){ const g=d.guests.find(g=>g.name===name); if(g) g.st=st; }
   else { if(st) d.st[name]=st; else delete d.st[name]; }
+  queueOp({t:"st", d:dateStr, n:name, s:st, g:isGuest?1:0});
   logChange(name, dateStr, old, st);
   save();
 }
@@ -246,12 +263,14 @@ function addGuest(dateStr, name){
   const d = day(dateStr);
   if(!name || d.guests.some(g=>g.name.toLowerCase()===name.toLowerCase())) return;
   d.guests.push({name, st:""});
+  queueOp({t:"addg", d:dateStr, n:name});
   logChange(name, dateStr, "", "toegevoegd");
   save();
 }
 function removeGuest(dateStr, name){
   const d = day(dateStr);
   d.guests = d.guests.filter(g=>g.name!==name);
+  queueOp({t:"rmg", d:dateStr, n:name});
   logChange(name, dateStr, "", "verwijderd");
   save();
 }
@@ -298,8 +317,8 @@ async function load(){
     try{
       const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now());
       if(r.ok){
-        const remote = await r.json();
-        if(remote && remote.days){ DATA = remote; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
+        const env = await r.json();
+        if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
       }
       setSync(true, dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map");
     }catch(e){ setSync(false, "Cloud niet bereikbaar – lokale gegevens"); }
@@ -322,12 +341,50 @@ async function pushCloud(){
     const r = await fetch(CONFIG.SCRIPT_URL, {
       method:"POST",
       headers:{"Content-Type":"text/plain"},   // text/plain → geen CORS-preflight
-      body: JSON.stringify(DATA)
+      body: JSON.stringify({rev: serverRev, data: DATA})
     });
-    if(r.ok){ dirty = false; setSync(true, "Gesynchroniseerd met de gedeelde map"); }
+    const res = await r.json();
+    if(res && res.ok){
+      dirty = false; pendingOps = []; serverRev = res.rev||0;
+      setSync(true, "Gesynchroniseerd met de gedeelde map");
+    }
+    else if(res && res.conflict){
+      // Iemand anders heeft ondertussen opgeslagen: verse data ophalen,
+      // eigen wijzigingen eroverheen leggen en één keer opnieuw sturen.
+      DATA = res.data || DATA; serverRev = res.rev||0;
+      try{ pendingOps.forEach(applyOp); }catch(e){}
+      logChange("—", "", "conflict", "andere wijzigingen samengevoegd");
+      const r2 = await fetch(CONFIG.SCRIPT_URL, {
+        method:"POST", headers:{"Content-Type":"text/plain"},
+        body: JSON.stringify({rev: serverRev, data: DATA})
+      });
+      const res2 = await r2.json();
+      if(res2 && res2.ok){ dirty = false; pendingOps = []; serverRev = res2.rev||0;
+        setSync(true, "Gesynchroniseerd met de gedeelde map"); render(); return; }
+      throw new Error();
+    }
     else throw new Error();
   }catch(e){ syncFailedModal(); }
 }
+
+// Verse data van anderen ophalen (alleen als we zelf niets open hebben staan)
+async function pull(){
+  if(!CONFIG.SCRIPT_URL || dirty) return;
+  try{
+    const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now());
+    if(!r.ok) return;
+    const env = await r.json();
+    if(env && env.data && env.data.days && env.rev !== serverRev){
+      DATA = env.data; serverRev = env.rev||0;
+      localStorage.setItem("bd_data", JSON.stringify(DATA));
+      render();
+    }
+  }catch(e){}
+}
+
+// sync-hartslag: niet-gesyncte wijzigingen opnieuw sturen, anders verversen
+window.addEventListener("focus", ()=>{ if(dirty) pushCloud(); else pull(); });
+setInterval(()=>{ if(dirty) pushCloud(); else pull(); }, 60000);
 
 let syncModalOpen = false;
 function syncFailedModal(){
@@ -341,15 +398,13 @@ function syncFailedModal(){
 }
 
 // Niet-gesyncte wijzigingen later alsnog proberen: bij focus en elke 60 s
-window.addEventListener("focus", ()=>{ if(dirty) pushCloud(); });
-setInterval(()=>{ if(dirty) pushCloud(); }, 60000);
 
 /* ---------- render ---------- */
 function memberChip(dateStr, name, st, guest){
   const x = guest? `<span class="x" data-act="rmguest" data-date="${dateStr}" data-name="${esc(name)}">✕</span>` : "";
   const note = (day(dateStr).notes||{})[name] || "";
   return `<span class="chip${guest?" guest":""}" data-st="${st}" data-act="cycle" data-date="${dateStr}" data-name="${esc(name)}" data-guest="${guest?1:0}">
-    <span class="st"></span>${esc(name)}<span class="chipnote" data-act="note" data-date="${dateStr}" data-name="${esc(name)}" title="${esc(note)}">${note? "💬" : "✎"}</span>${x}</span>`;
+    <span class="st"></span>${esc(name)}<span class="chipnote${note? "" : " empty"}" data-act="note" data-date="${dateStr}" data-name="${esc(name)}" title="${esc(note)}">💬</span>${x}</span>`;
 }
 function chipRow(dateStr, d){
   let html = "";
@@ -370,7 +425,7 @@ function dayCard(dateStr, past){
   const c = counts(d);
   const isTarget = DATA.target && dateStr===DATA.target;
   const isSat = dt.getDay()===6;
-  const title = d.title? esc(d.title) : (isTarget? "Optreden" : (isSat? "Repetitie" : "Extra dag"));
+  const title = d.title? esc(d.title) : (isTarget? "Optreden" : (isSat? "Spelen" : "Extra dag"));
   let cd = "";
   if(isTarget){
     const diff = Math.round((new Date(dateStr+"T12:00:00") - new Date(today()+"T12:00:00"))/86400000);
@@ -421,7 +476,7 @@ document.body.addEventListener("click", e=>{
       const idx = STATUS.indexOf(cur);
       setStatus(dateStr, name, idx < STATUS.length-1 ? STATUS[idx+1] : "", guest);
     };
-    if(!me){ me = name; localStorage.setItem("bd_me", me); toast("Hoi " + me + " 👋"); doCycle(); }
+    if(!me){ me = name; localStorage.setItem("bd_me", me); doCycle(); }
     else if(me===name){ doCycle(); }
     else{
       // op een andere naam getikt: ben je het zelf of wijzig je namens iemand?
@@ -439,7 +494,7 @@ document.body.addEventListener("click", e=>{
   else if(act==="title"){ openTitleSheet(dateStr); }
   else if(act==="log"){ openLogSheet(dateStr); }
   else if(act==="del"){
-    if(confirm("Deze dag verwijderen uit Speleu??")){ delete DATA.days[dateStr]; save(); }
+    if(confirm("Deze dag verwijderen uit Speleu??")){ delete DATA.days[dateStr]; queueOp({t:"delday", d:dateStr}); save(); }
   }
 });
 
@@ -460,11 +515,13 @@ function openNoteSheet(dateStr, name){
   $("#nOk").onclick = ()=>{
     d.notes[name] = $("#nText").value.trim();
     if(d.notes[name]) logChange(name, dateStr, cur, "opmerking: " + d.notes[name]);
+    queueOp({t:"note", d:dateStr, n:name, v:d.notes[name]});
     save(); closeSheet();
   };
   if($("#nDel")) $("#nDel").onclick = ()=>{
     delete d.notes[name];
     logChange(name, dateStr, cur, "opmerking gewist");
+    queueOp({t:"note", d:dateStr, n:name, v:""});
     save(); closeSheet();
   };
 }
@@ -493,6 +550,29 @@ function openGuestSheet(dateStr){
   };
 }
 
+function openRemovePersonSheet(dateStr){
+  const d = day(dateStr);
+  const withStatus = DATA.members.filter(m=>d.st[m]);
+  const guests = (d.guests||[]);
+  if(!withStatus.length && !guests.length){ toast("Niets te wissen op deze dag"); return; }
+  openSheet(`<h3>Wie wissen op ${fmtDate(dateStr)}?</h3>
+    ${withStatus.map(m=>`<button class="menuitem" data-rm="${esc(m)}"><span class="g">${esc(m)} <span class="sub">status en opmerking wissen</span></span></button>`).join("")}
+    ${guests.map(g=>`<button class="menuitem" data-rmg="${esc(g.name)}"><span class="g">${esc(g.name)} <span class="sub">helemaal van deze dag halen</span></span></button>`).join("")}`);
+  $("#shSheet").querySelectorAll("[data-rm]").forEach(b=>{
+    b.onclick = ()=>{
+      const n = b.dataset.rm;
+      delete d.st[n]; if(d.notes) delete d.notes[n];
+      queueOp({t:"st", d:dateStr, n, s:"", g:0});
+      queueOp({t:"note", d:dateStr, n, v:""});
+      logChange(n, dateStr, "", "gewist op deze dag");
+      save(); closeSheet();
+    };
+  });
+  $("#shSheet").querySelectorAll("[data-rmg]").forEach(b=>{
+    b.onclick = ()=>{ removeGuest(dateStr, b.dataset.rmg); closeSheet(); };
+  });
+}
+
 function openTitleSheet(dateStr){
   const cur = day(dateStr).title||"";
   const future = dateStr >= today();
@@ -501,13 +581,15 @@ function openTitleSheet(dateStr){
     <button class="cta" id="tOk">Opslaan</button>
     <button class="cta" id="tLog" style="background:#8e8e93;margin-top:10px">🕘 Wijzigingenlog</button>
     <button class="cta" id="tAdd" style="background:#8e8e93;margin-top:10px">＋ Iemand toevoegen</button>
+    <button class="cta" id="tRm" style="background:#8e8e93;margin-top:10px">➖ Iemand wissen op deze dag</button>
     ${future? `<button class="cta" id="tDel" style="background:#ff3b30;margin-top:10px">Verwijder dag</button>` : ""}`);
   $("#tName").focus();
-  $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); save(); closeSheet(); };
+  $("#tOk").onclick = ()=>{ day(dateStr).title = $("#tName").value.trim(); queueOp({t:"title", d:dateStr, v:day(dateStr).title}); save(); closeSheet(); };
   $("#tLog").onclick = ()=> openLogSheet(dateStr);
   $("#tAdd").onclick = ()=> openGuestSheet(dateStr);
+  $("#tRm").onclick = ()=> openRemovePersonSheet(dateStr);
   if($("#tDel")) $("#tDel").onclick = ()=>{
-    if(confirm("Deze dag verwijderen uit Speleu?")){ delete DATA.days[dateStr]; save(); closeSheet(); }
+    if(confirm("Deze dag verwijderen uit Speleu?")){ delete DATA.days[dateStr]; queueOp({t:"delday", d:dateStr}); save(); closeSheet(); }
   };
 }
 
@@ -531,7 +613,7 @@ function openMenu(){
     <button class="menuitem" data-m="target"><span class="g">🎯 Optreden / doel instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
     <button class="menuitem" data-m="hist"><span class="g">🕘 Historie opvragen<span class="sub">Eerdere dagen (onderaan de lijst)</span></span></button>
     <button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>
-    <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🎵 Opnamen in de Mono Lisa app<span class="sub">Moly · muziekspeler</span></span></a>
+    <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🔊 Mixes<span class="sub">Moly · muziekspeler</span></span></a>
     <div style="text-align:center;font-size:11px;color:var(--ink2);padding-top:16px">Speleu? v${VERSION}</div>`;
   $("#ovMenu").classList.add("show");
 }
@@ -555,10 +637,12 @@ function openMeSheet(){
     openSheet(`<h3>Jij bent ${esc(me)}</h3>
       <p style="font-size:13px;color:var(--ink2)">${isMember? "Je alias in de bandlijst — mag je zelf aanpassen:" : "Je naam — mag je zelf aanpassen:"}</p>
       <input type="text" id="meName" value="${esc(me)}" autocomplete="off" maxlength="30">
+      <button class="mini" id="meClear" style="margin-top:8px">✕ naam wissen</button>
       ${isMember? "" : `<label class="checkrow"><input type="checkbox" id="meRec" checked> meedoen op alle komende dagen</label>
       <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Uitgezet? Dan sta je er alleen nog op dagen waarop je je hebt opgegeven. Reageer je nergens op de laatste dag, dan verdwijn je van de lijst.</p>`}
       <button class="cta" id="meOk">Opslaan</button>`);
     $("#meName").focus();
+    $("#meClear").onclick = ()=>{ $("#meName").value = ""; $("#meName").focus(); };
     $("#meOk").onclick = ()=>{
       const n = $("#meName").value.trim();
       if(!n){ toast("Vul een naam in"); return; }
@@ -594,7 +678,7 @@ function openMeSheet(){
     $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
       b.onclick = ()=>{
         me = b.dataset.claim; localStorage.setItem("bd_me", me);
-        closeSheet(); render(); toast("Hoi " + me + " 👋");
+        closeSheet(); render();
       };
     });
     $("#btnNew").onclick = ()=>{
@@ -608,7 +692,7 @@ function openMeSheet(){
         logChange(n, "", "", "aangemeld voor alle komende dagen");
         save();
       }
-      closeSheet(); render(); toast("Hoi " + n + " 👋");
+      closeSheet(); render();
     };
   }
 }
@@ -631,7 +715,7 @@ function openGuestSignup(){
       logChange(n, "", "", "aangemeld voor alle komende dagen");
       save();
     }
-    closeSheet(); render(); toast("Hoi " + n + " 👋");
+    closeSheet(); render();
   };
 }
 // naam/identiteit loopt via het ☰-menu ("Wie ben jij?")
