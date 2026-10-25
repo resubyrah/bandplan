@@ -212,7 +212,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "2.0";
+const VERSION = "2.1";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -380,8 +380,7 @@ function initGoogle(){
         if(ACCOUNT) localStorage.setItem("bd_email", ACCOUNT);
         loginAsked = false;
         linkAccount();
-        pull();                                 // na inloggen meteen verse data
-        if(dirty) scheduleSync();
+        load();                                 // na inloggen meteen data laden én syncbalk verversen
       },
       auto_select: true
     });
@@ -402,7 +401,10 @@ function needLoginModal(){
   setSync(false, "Eerst inloggen bij Google");
   openSheet(`<h3>🔐 Inloggen</h3>
     <p style="font-size:14px;color:var(--ink2)">Speleu? werkt mee met je Google-account. Klik hieronder en kies het account waarmee je meespeelt.</p>
-    <button class="cta" id="gBtn">Inloggen met Google</button>`);
+    <button class="cta" id="gBtn">Inloggen met Google</button>
+    <p style="font-size:12px;color:var(--ink2);margin-top:10px">Werkt de knop niet (komt voor in Safari)? Zorg dat je bij Google bent ingelogd
+    (<a href="https://accounts.google.com" target="_blank" rel="noopener">accounts.google.com</a>), zet bij Safari → Instellingen → Privacy
+    "Volg niet alle cross-site trackers" even uit, en ververs daarna. Of gebruik Chrome.</p>`);
   $("#gBtn").onclick = ()=>{ closeSheet(); google.accounts.id.prompt(); };
 }
 
