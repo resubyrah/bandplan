@@ -191,6 +191,7 @@
 <div class="overlay" id="ovSheet"><div class="sheet" id="shSheet"></div></div>
 <div class="toast" id="toast"></div>
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 /* ================= CONFIG =================
  * Zonder login: de app praat met een kleine Google Apps Script-webapp die
@@ -205,12 +206,13 @@ const CONFIG = {
   MEMBERS: ["Frans", "Peter", "Patrick", "Wim", "Harrie"],  // vaste bandleden (aliases, zelf aanpasbaar)
   SATURDAYS: 10,                       // aantal komende zaterdagen
   HISTORY_MONTHS: 6,                   // dagen ouder dan dit worden uit de data gesnoeid
-  LOG_MAX: 300                         // max regels in de wijzigingenlog
+  LOG_MAX: 300,                        // max regels in de wijzigingenlog
+  CLIENT_ID: "513652605614-3hfn0paa2cs6p506spkqs1qrfgcnuhp5.apps.googleusercontent.com"
 };
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "1.11";
+const VERSION = "2.0";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -231,6 +233,16 @@ function applyOp(o){
   else if(o.t==="addg"){ const d=day(o.d); if(!d.guests.some(g=>g.name===o.n)) d.guests.push({name:o.n, st:o.s||""}); }
   else if(o.t==="rmg"){ const d=day(o.d); d.guests = d.guests.filter(g=>g.name!==o.n); }
   else if(o.t==="delday"){ delete DATA.days[o.d]; }
+  else if(o.t==="acct"){ if(!DATA.accounts) DATA.accounts={}; DATA.accounts[o.e]=o.n; }
+}
+function storeAccount(){                     // koppelt het Google-account aan de gekozen naam
+  if(!ACCOUNT || !me) return;
+  if(!DATA.accounts) DATA.accounts = {};
+  if(DATA.accounts[ACCOUNT] !== me){
+    DATA.accounts[ACCOUNT] = me;
+    queueOp({t:"acct", e:ACCOUNT, n:me});
+    save();
+  }
 }
 
 /* ---------- helpers ---------- */
@@ -324,9 +336,10 @@ async function load(){
   if(local){ try{ DATA = JSON.parse(local); }catch(e){} }
   if(CONFIG.SCRIPT_URL){
     try{
-      const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now());
+      const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
       if(r.ok){
         const env = await r.json();
+        if(env && env.auth === false){ needLoginModal(); return; }
         if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
       }
       setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
@@ -344,6 +357,55 @@ function setSync(ok, txt){
 }
 
 let lastSyncT = null;      // tijdstip laatste geslaagde cloud-sync
+
+/* ---------- Google-login (identiteitscontrole) ---------- */
+let ID_TOKEN = "";        // Google ID-token (vervalt na ~1 uur, wordt stil ververst)
+let ACCOUNT = localStorage.getItem("bd_email") || "";   // gecontroleerd mailadres
+let loginAsked = false;
+
+function jwtEmail(tok){                        // e-mail uit het token lezen (alleen ter info)
+  try{
+    const p = JSON.parse(decodeURIComponent(escape(atob(tok.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")))));
+    return p.email || "";
+  }catch(e){ return ""; }
+}
+function initGoogle(){
+  if(!CONFIG.CLIENT_ID) return;
+  const start = ()=>{ if(!window.google || !google.accounts) return setTimeout(start, 200);
+    google.accounts.id.initialize({
+      client_id: CONFIG.CLIENT_ID,
+      callback: resp=>{
+        ID_TOKEN = resp.credential;
+        ACCOUNT = jwtEmail(ID_TOKEN);
+        if(ACCOUNT) localStorage.setItem("bd_email", ACCOUNT);
+        loginAsked = false;
+        linkAccount();
+        pull();                                 // na inloggen meteen verse data
+        if(dirty) scheduleSync();
+      },
+      auto_select: true
+    });
+    google.accounts.id.prompt();                // stille inlog-poging (One Tap)
+  };
+  start();
+}
+function linkAccount(){                          // e-mail ↔ bandnaam koppelen
+  if(!ACCOUNT || !me) return;
+  if(!DATA.accounts) DATA.accounts = {};
+  if(DATA.accounts[ACCOUNT] && DATA.accounts[ACCOUNT] !== me){
+    me = DATA.accounts[ACCOUNT]; localStorage.setItem("bd_me", me);
+  }
+}
+function needLoginModal(){
+  if(loginAsked) return;
+  loginAsked = true;
+  setSync(false, "Eerst inloggen bij Google");
+  openSheet(`<h3>🔐 Inloggen</h3>
+    <p style="font-size:14px;color:var(--ink2)">Speleu? werkt mee met je Google-account. Klik hieronder en kies het account waarmee je meespeelt.</p>
+    <button class="cta" id="gBtn">Inloggen met Google</button>`);
+  $("#gBtn").onclick = ()=>{ closeSheet(); google.accounts.id.prompt(); };
+}
+
 function syncTimeTxt(){
   return lastSyncT? " · laatste sync " + lastSyncT.toLocaleTimeString("nl-NL", {hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "";
 }
@@ -361,9 +423,10 @@ async function pushCloud(){
     const r = await fetch(CONFIG.SCRIPT_URL, {
       method:"POST",
       headers:{"Content-Type":"text/plain"},   // text/plain → geen CORS-preflight
-      body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog})
+      body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, tok: ID_TOKEN})
     });
     const res = await r.json();
+    if(res && res.auth === false){ needLoginModal(); return; }
     if(res && res.ok){
       dirty = false; pendingOps = []; serverRev = res.rev||0; pendingLog = [];
       lastSyncT = new Date();
@@ -377,9 +440,10 @@ async function pushCloud(){
       logChange("—", "", "conflict", "andere wijzigingen samengevoegd");
       const r2 = await fetch(CONFIG.SCRIPT_URL, {
         method:"POST", headers:{"Content-Type":"text/plain"},
-        body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog})
+        body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, tok: ID_TOKEN})
       });
       const res2 = await r2.json();
+      if(res2 && res2.auth === false){ needLoginModal(); return; }
       if(res2 && res2.ok){ dirty = false; pendingOps = []; serverRev = res2.rev||0; pendingLog = [];
         lastSyncT = new Date();
         setSync(true, "Gesynchroniseerd met de gedeelde map" + syncTimeTxt()); render(); return; }
@@ -393,9 +457,10 @@ async function pushCloud(){
 async function pull(){
   if(!CONFIG.SCRIPT_URL || dirty) return;
   try{
-    const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now());
+    const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
     if(!r.ok) return;
     const env = await r.json();
+    if(env && env.auth === false){ return; }   // stil: wachten op login
     if(env && env.data && env.data.days && env.rev !== serverRev){
       DATA = env.data; serverRev = env.rev||0;
       localStorage.setItem("bd_data", JSON.stringify(DATA));
@@ -681,8 +746,9 @@ let logCache = [];
 async function fetchLog(){
   if(CONFIG.SCRIPT_URL){
     try{
-      const r = await fetch(CONFIG.SCRIPT_URL + "?log=1&t=" + Date.now());
-      if(r.ok){ const env = await r.json(); if(env && Array.isArray(env.log)){
+      const r = await fetch(CONFIG.SCRIPT_URL + "?log=1&t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
+      if(r.ok){ const env = await r.json(); if(env && env.auth === false){ needLoginModal(); return pendingLog; }
+        if(env && Array.isArray(env.log)){
         logCache = env.log.sort((a,b)=> String(b.t).localeCompare(String(a.t)));   // nieuwste eerst
         return logCache;
       } }
@@ -775,6 +841,7 @@ function openMeSheet(){
     $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
       b.onclick = ()=>{
         me = b.dataset.claim; localStorage.setItem("bd_me", me);
+        storeAccount();
         closeSheet(); render();
       };
     });
@@ -789,7 +856,7 @@ function openMeSheet(){
         logChange(n, "", "", "aangemeld voor alle komende dagen");
         save();
       }
-      closeSheet(); render();
+    closeSheet(); render();
     };
   }
 }
@@ -809,6 +876,7 @@ function openGuestSignup(){
     DATA.recurring_guests.push({name:n, since:today()});
     logChange(n, "", "", "aangemeld");
     save();
+    storeAccount();
     closeSheet(); render();
   };
 }
@@ -867,6 +935,7 @@ function openFullLog(){
 $("#fabAdd").onclick = openDateSheet;
 
 /* ---------- start ---------- */
+initGoogle();
 load();
 </script>
 </body>
