@@ -212,7 +212,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "2.3";
+const VERSION = "2.4";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -340,7 +340,7 @@ async function load(){
       if(r.ok){
         const env = await r.json();
         if(env && env.auth === false){
-          if(ID_TOKEN) setSync(false, "Login niet geaccepteerd – tik hieronder opnieuw" + syncTimeTxt());
+          if(ID_TOKEN) setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + " — tik op de avatar of hieronder" + syncTimeTxt());
           needLoginModal();
         }   // scherm blijft gewoon tekenen met lokale data
         else if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
