@@ -212,7 +212,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "2.2";
+const VERSION = "2.3";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -339,7 +339,10 @@ async function load(){
       const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
       if(r.ok){
         const env = await r.json();
-        if(env && env.auth === false){ needLoginModal(); }   // scherm blijft gewoon tekenen met lokale data
+        if(env && env.auth === false){
+          if(ID_TOKEN) setSync(false, "Login niet geaccepteerd – tik hieronder opnieuw" + syncTimeTxt());
+          needLoginModal();
+        }   // scherm blijft gewoon tekenen met lokale data
         else if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
       }
       if(!loginAsked) setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
@@ -375,12 +378,16 @@ function initGoogle(){
     google.accounts.id.initialize({
       client_id: CONFIG.CLIENT_ID,
       callback: resp=>{
-        ID_TOKEN = resp.credential;
-        ACCOUNT = jwtEmail(ID_TOKEN);
-        if(ACCOUNT) localStorage.setItem("bd_email", ACCOUNT);
-        loginAsked = false;
-        linkAccount();
-        load();                                 // na inloggen meteen data laden én syncbalk verversen
+        try{
+          ID_TOKEN = resp.credential;
+          ACCOUNT = jwtEmail(ID_TOKEN);
+          if(ACCOUNT) localStorage.setItem("bd_email", ACCOUNT);
+          loginAsked = false;
+          closeSheet();
+          setSync(true, "Ingelogd" + (ACCOUNT? " als " + ACCOUNT : "") + " – synchroniseren…" + syncTimeTxt());
+          linkAccount();
+          load();
+        }catch(e){ console.error("login-callback", e); }
       },
       auto_select: true
     });
@@ -403,9 +410,8 @@ function needLoginModal(){
     <p style="font-size:14px;color:var(--ink2)">Speleu? werkt mee met je Google-account. Kies hieronder het account waarmee je meespeelt.</p>
     <div id="gBtnWrap" style="display:flex;justify-content:center;margin:6px 0"></div>
     <button class="cta" id="gBtn">Opnieuw proberen</button>`);
-  try{
-    google.accounts.id.renderButton($("#gBtnWrap"), { theme: "outline", size: "large" });  // officiële knop → popup-flow, werkt ook in Safari
-  }catch(e){ /* GSI nog niet geladen → gewone knop hieronder */ }
+  const drawBtn = ()=>{ try{ google.accounts.id.renderButton($("#gBtnWrap"), { theme: "outline", size: "large" }); }catch(e){ setTimeout(drawBtn, 300); } };
+  drawBtn();   // Google-knop (popup-flow, werkt ook in Safari); wacht tot GSI geladen is
   $("#gBtn").onclick = ()=>{ try{ google.accounts.id.prompt(); }catch(e){} };
 }
 
