@@ -212,7 +212,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "2.1";
+const VERSION = "2.2";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -339,10 +339,10 @@ async function load(){
       const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
       if(r.ok){
         const env = await r.json();
-        if(env && env.auth === false){ needLoginModal(); return; }
-        if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
+        if(env && env.auth === false){ needLoginModal(); }   // scherm blijft gewoon tekenen met lokale data
+        else if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
       }
-      setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
+      if(!loginAsked) setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
     }catch(e){ setSync(false, "Cloud niet bereikbaar – lokale gegevens"); }
   } else {
     setSync(false, "Demomodus: opgeslagen op dit apparaat");
@@ -400,12 +400,13 @@ function needLoginModal(){
   loginAsked = true;
   setSync(false, "Eerst inloggen bij Google");
   openSheet(`<h3>🔐 Inloggen</h3>
-    <p style="font-size:14px;color:var(--ink2)">Speleu? werkt mee met je Google-account. Klik hieronder en kies het account waarmee je meespeelt.</p>
-    <button class="cta" id="gBtn">Inloggen met Google</button>
-    <p style="font-size:12px;color:var(--ink2);margin-top:10px">Werkt de knop niet (komt voor in Safari)? Zorg dat je bij Google bent ingelogd
-    (<a href="https://accounts.google.com" target="_blank" rel="noopener">accounts.google.com</a>), zet bij Safari → Instellingen → Privacy
-    "Volg niet alle cross-site trackers" even uit, en ververs daarna. Of gebruik Chrome.</p>`);
-  $("#gBtn").onclick = ()=>{ closeSheet(); google.accounts.id.prompt(); };
+    <p style="font-size:14px;color:var(--ink2)">Speleu? werkt mee met je Google-account. Kies hieronder het account waarmee je meespeelt.</p>
+    <div id="gBtnWrap" style="display:flex;justify-content:center;margin:6px 0"></div>
+    <button class="cta" id="gBtn">Opnieuw proberen</button>`);
+  try{
+    google.accounts.id.renderButton($("#gBtnWrap"), { theme: "outline", size: "large" });  // officiële knop → popup-flow, werkt ook in Safari
+  }catch(e){ /* GSI nog niet geladen → gewone knop hieronder */ }
+  $("#gBtn").onclick = ()=>{ try{ google.accounts.id.prompt(); }catch(e){} };
 }
 
 function syncTimeTxt(){
