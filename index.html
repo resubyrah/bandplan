@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.1";
+const VERSION = "3.6";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -220,6 +220,7 @@ let me = localStorage.getItem("bd_me") || "";
 let DEVID = localStorage.getItem("bd_devid");
 if(!DEVID){ DEVID = Math.random().toString(36).slice(2,8); localStorage.setItem("bd_devid", DEVID); }
 let dirty = false;          // lokale wijzigingen nog niet naar de cloud
+let showHist = false;       // historie tonen? standaard verborgen, via ☰-menu aan te zetten
 let serverRev = 0;           // revisie (Drive-timestamp) van de data zoals we die laast zagen
 let pendingOps = [];         // eigen wijzigingen sinds laatste geslaagde sync (voor merge)
 
@@ -311,12 +312,17 @@ function prune(){
 }
 
 function renameMember(oldN, newN){
+  if(!newN){ toast("Vul een naam in"); return false; }
+  // hernoemen naar een bestaande naam is verboden: voorkomt samenvoegen van twee personen
+  const bestaat = DATA.members.includes(newN) || (DATA.recurring_guests||[]).some(g=>g.name===newN);
+  if(bestaat && newN !== oldN){ toast("Die naam bestaat al — kies een andere"); return false; }
   const i = DATA.members.indexOf(oldN);
-  if(i>=0 && newN) DATA.members[i] = newN;
+  if(i>=0) DATA.members[i] = newN;
   Object.values(DATA.days).forEach(d=>{
     if(d.st && oldN in d.st){ d.st[newN] = d.st[oldN]; delete d.st[oldN]; }
   });
   logChange(newN, "", oldN, "alias gewijzigd");
+  return true;
 }
 
 async function load(){
@@ -331,7 +337,14 @@ async function load(){
           if(ACCOUNT || PWH) setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + syncTimeTxt());
           needLoginModal();
         }   // scherm blijft gewoon tekenen met lokale data
-        else if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
+        else if(env && env.data && env.data.days){
+          DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; localStorage.setItem("bd_data", JSON.stringify(DATA));
+          if(!loginLogged && ACCOUNT){                 // wie, wanneer, vanaf welk apparaat/regio
+            loginLogged = true;
+            logChange("login", "", "app-open", deviceInfo());
+            save();
+          }
+        }
       }
       if(!loginAsked) setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
     }catch(e){ setSync(false, "Cloud niet bereikbaar – lokale gegevens"); }
@@ -352,7 +365,7 @@ let lastSyncT = null;      // tijdstip laatste geslaagde cloud-sync
 /* ---------- Toegang: naam + band-wachtwoord (per apparaat onthouden) ---------- */
 let ACCOUNT = localStorage.getItem("bd_user") || "";   // de naam waarmee je bent ingelogd
 let PWH = localStorage.getItem("bd_pwh") || "";         // SHA-256 van het band-wachtwoord
-let ADMIN = false;                                     // bepaalt de backend na elke sync
+let ADMIN = false;                                     // bepaalt de backend na elke sync (admin logt in met de beheerderscode)
 let loginAsked = false;
 
 async function sha256(s){
@@ -365,9 +378,9 @@ function needLoginModal(){
   loginAsked = true;
   setSync(false, "Eerst inloggen");
   openSheet(`<h3>🔐 Inloggen</h3>
-    <p style="font-size:14px;color:var(--ink2)">Vul je naam (zoals in de band) en het band-wachtwoord in. Wordt op dit apparaat onthouden.</p>
+    <p style="font-size:14px;color:var(--ink2)">Vul je naam en wachtwoord in. Wordt op dit apparaat onthouden.</p>
     <input type="text" id="liName" placeholder="Je naam" value="${esc(ACCOUNT||"")}" autocomplete="off" style="margin-bottom:8px">
-    <input type="password" id="liPw" placeholder="Band-wachtwoord" autocomplete="off">
+    <input type="password" id="liPw" placeholder="Wachtwoord" autocomplete="off">
     <button class="cta" id="liOk">Aanmelden</button>`);
   $("#liName").focus();
   $("#liOk").onclick = async ()=>{
@@ -387,6 +400,15 @@ function feat(key, dflt){                      // feature-toggle uitlezen (staat
   if(!DATA.features) return dflt;
   const v = DATA.features[key];
   return v === undefined? dflt : v;
+}
+let loginLogged = false;                       // 1× per app-open een login-regel in het log
+function deviceInfo(){
+  let tz = "—";
+  try{ tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "—"; }catch(e){}
+  const ua = navigator.userAgent || "";
+  const dev = /iPhone/.test(ua)? "iPhone" : /iPad/.test(ua)? "iPad" : /Android/.test(ua)? "Android"
+            : /Macintosh/.test(ua)? "Mac" : /Windows/.test(ua)? "Windows" : "onbekend";
+  return `${dev} · ${tz} · ${navigator.language || "—"}`;
 }
 
 function syncTimeTxt(){
@@ -550,7 +572,7 @@ function render(){
   const pastD = all.filter(dk=>dk<t);
 
   $("#upcoming").innerHTML = up.map(dk=>dayCard(dk,false)).join("");
-  $("#past").innerHTML = pastD.length?
+  $("#past").innerHTML = (showHist && pastD.length)?
     `<div class="sectionlabel">🗓 Historie</div>` + pastD.slice().reverse().map(dk=>dayCard(dk,true)).join("") : "";
   balanceChips();
 }
@@ -701,13 +723,13 @@ function openTitleSheet(dateStr){
   const future = dateStr >= today();
   openSheet(`<h3>${fmtDate(dateStr)}</h3>
     <button class="menuitem" data-do="t"><span class="g">✎ Titel wijzigen</span></button>
-    <button class="menuitem" data-do="log"><span class="g">🕘 Wijzigingenlog</span></button>
+    ${ADMIN? `<button class="menuitem" data-do="log"><span class="g">🕘 Wijzigingenlog</span></button>`: ""}
     <button class="menuitem" data-do="add"><span class="g">＋ Iemand toevoegen</span></button>
     <button class="menuitem" data-do="rm"><span class="g">➖ Iemand wissen op deze dag</span></button>
     ${future? `<button class="menuitem" data-do="del"><span class="g" style="color:#ff3b30">🗑 Verwijder dag</span></button>` : ""}`);
   const q = s=>$("#shSheet").querySelector(s);
   q('[data-do="t"]').onclick = ()=> openTitleEditSheet(dateStr);
-  q('[data-do="log"]').onclick = ()=> openLogSheet(dateStr);
+  if(q('[data-do="log"]')) q('[data-do="log"]').onclick = ()=> openLogSheet(dateStr);
   q('[data-do="add"]').onclick = ()=> openGuestSheet(dateStr);
   q('[data-do="rm"]').onclick = ()=> openRemovePersonSheet(dateStr);
   if(q('[data-do="del"]')) q('[data-do="del"]').onclick = ()=>{
@@ -742,6 +764,7 @@ async function fetchLog(){
 }
 
 function openLogSheet(dateStr){
+  if(!ADMIN) return;                    // bandleden: stilzwijgend niets (server dwingt ook af)
   openSheet(`<h3>Wijzigingenlog · ${fmtDate(dateStr)}</h3>
     <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Readonly – alleen geregistreerde wijzigingen</p>
     <div class="loglist" id="loglist"><div class="empty">Laden…</div></div>
@@ -763,8 +786,9 @@ function openMenu(){
     ${(feat("extraDatum", true) || ADMIN)? `<button class="menuitem" data-m="date"><span class="g">📅 Extra datum toevoegen<span class="sub">Anders dan een zaterdag</span></span></button>`: ``}
     <button class="menuitem" data-m="target"><span class="g">🎯 Optreden / doel instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
     <button class="menuitem" data-m="hist"><span class="g">🕘 Historie opvragen<span class="sub">Eerdere dagen (onderaan de lijst)</span></span></button>
-    ${(feat("volledigeLog", true) || ADMIN)? `<button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>`: ``}
-    ${ADMIN? `<button class="menuitem" data-m="feats"><span class="g">⚙️ Instellingen &amp; features<span class="sub">Alleen zichtbaar voor beheerders</span></span></button>`: ``}
+    ${ADMIN? `<button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>
+              <button class="menuitem" data-m="feats"><span class="g">⚙️ Instellingen &amp; features<span class="sub">Alleen zichtbaar voor beheerders</span></span></button>`: ``}
+    <button class="menuitem" data-m="logout"><span class="g">🔑 Uitloggen<span class="sub">Naam en wachtwoord van dit apparaat wissen</span></span></button>
     <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🔊 Mixes<span class="sub">Moly · muziekspeler</span></span></a>
     <div style="text-align:center;font-size:11px;color:var(--ink2);padding-top:16px">Speleu? v${VERSION}</div>`;
   $("#ovMenu").classList.add("show");
@@ -779,16 +803,25 @@ $("#ovMenu").addEventListener("click", e=>{
   if(m==="me") openMeSheet();
   else if(m==="date") openDateSheet();
   else if(m==="target") openTargetSheet();
-  else if(m==="hist"){ window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }
+  else if(m==="hist"){ showHist = true; render(); window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }
   else if(m==="fulllog") openFullLog();
   else if(m==="feats") openFeatsSheet();
+  else if(m==="logout"){
+    ACCOUNT = ""; PWH = ""; me = ""; ADMIN = false; loginAsked = false;
+    localStorage.removeItem("bd_user"); localStorage.removeItem("bd_pwh"); localStorage.removeItem("bd_me");
+    closeMenu();
+    setSync(false, "Uitgelogd — lokale gegevens blijven staan");
+    needLoginModal();
+    render();
+  }
 });
+
+function closeMenu(){ $("#ovMenu").classList.remove("show"); }
 
 function openFeatsSheet(){
   if(!ADMIN){ toast("Alleen voor beheerders"); return; }
   const toggles = [
-    { key: "extraDatum",  label: "📅 Extra datum toevoegen", sub: "Mogen alle bandleden extra dagen toevoegen, of alleen beheerders?" },
-    { key: "volledigeLog", label: "📜 Volledige wijzigingenlog", sub: "Zichtbaar voor iedereen, of alleen voor beheerders?" }
+    { key: "extraDatum",  label: "📅 Extra datum toevoegen", sub: "Mogen alle bandleden extra dagen toevoegen, of alleen beheerders?" }
   ];
   openSheet(`<h3>⚙️ Instellingen &amp; features</h3>
     <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Wijzigingen gelden meteen voor de hele band (binnen ~10 s, zonder verversen)</p>
@@ -843,8 +876,7 @@ function openMeSheet(){
         ${(DATA.recurring_guests||[]).map(g=>`<span class="chip" data-claim="${esc(g.name)}"><span class="st"></span>${esc(g.name)}</span>`).join("")}
         <span class="chip" id="chipNew"><span class="st"></span><input type="text" id="newName" placeholder="naam…" maxlength="30" style="border:none;outline:none;font:inherit;width:90px;background:none;padding:0"></span>
       </div>
-      <label class="checkrow" style="margin-top:10px"><input type="checkbox" id="newRec"> meedoen op alle komende dagen</label>
-      <p style="font-size:12px;color:var(--ink2);margin-top:-2px">Vink aan? Dan zie je zelf je chip op alle dagen om in te tikken. Anderen zien je pas als je ergens op getikt hebt.</p>
+      <p style="font-size:12px;color:var(--ink2);margin-top:4px">Je chip verschijnt op alle dagen om in te tikken; anderen zien je pas als je ergens op getikt hebt.</p>
       <button class="cta" id="btnNew">Dat ben ik</button>`);
     $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
       b.onclick = ()=>{
@@ -858,13 +890,7 @@ function openMeSheet(){
       if(!n){ toast("Vul je naam in"); return; }
       if(DATA.members.includes(n) || (DATA.recurring_guests||[]).some(g=>g.name===n)){ toast("Die naam bestaat al"); return; }
       me = n; localStorage.setItem("bd_me", n);
-      if($("#newRec").checked){
-        if(!DATA.recurring_guests) DATA.recurring_guests = [];
-        DATA.recurring_guests.push({name:n, since:today()});
-        logChange(n, "", "", "aangemeld voor alle komende dagen");
-        save();
-      }
-    closeSheet(); render();
+      closeSheet(); render();
     };
   }
 }
