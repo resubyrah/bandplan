@@ -174,7 +174,7 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
   </button>
   <h1>Speleu?</h1>
-  <button class="avatar" id="btnMe" title="Wie ben jij?" style="display:none"></button>
+  <button class="avatar" id="btnMe" style="display:none"></button>
 </header>
 
 <main>
@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.6";
+const VERSION = "3.8";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -313,9 +313,13 @@ function prune(){
 
 function renameMember(oldN, newN){
   if(!newN){ toast("Vul een naam in"); return false; }
-  // hernoemen naar een bestaande naam is verboden: voorkomt samenvoegen van twee personen
-  const bestaat = DATA.members.includes(newN) || (DATA.recurring_guests||[]).some(g=>g.name===newN);
-  if(bestaat && newN !== oldN){ toast("Die naam bestaat al — kies een andere"); return false; }
+  // hernoemen naar een bestaande naam is verboden — lookup overal in de data:
+  // leden, vaste gasten, gast-chips op dagen, én al getikte namen
+  const inUse = DATA.members.includes(newN)
+    || (DATA.recurring_guests||[]).some(g=>g.name===newN)
+    || Object.values(DATA.days).some(d=>d.st && (newN in d.st))
+    || Object.values(DATA.days).some(d=>(d.guests||[]).some(g=>g.name===newN));
+  if(inUse && newN !== oldN){ toast("Die naam is al in gebruik — kies een andere"); return false; }
   const i = DATA.members.indexOf(oldN);
   if(i>=0) DATA.members[i] = newN;
   Object.values(DATA.days).forEach(d=>{
@@ -555,6 +559,7 @@ function render(){
   const av = $("#btnMe");
   av.style.display = me? "flex" : "none";
   av.textContent = (me||"").slice(0,2).toUpperCase();
+  av.title = me || "";                 // hover: de volledige naam; klik doet niets (naam komt vast uit de login)
 
   const sats = nextSaturdays(CONFIG.SATURDAYS);
   // alle zaterdagen tot aan het target meenemen (bv. bij optreden verder weg)
@@ -635,7 +640,7 @@ document.body.addEventListener("click", e=>{
     queueOp({t:"note", d:dateStr, n:name, v:""});
     save();
   }
-  else if(act==="daynote"){ if(!me) openMeSheet(); else openNoteSheet(dateStr, me); }
+  else if(act==="daynote"){ if(!me) needLoginModal(); else openNoteSheet(dateStr, me); }
   else if(act==="addguest"){ openGuestSheet(dateStr); }
   else if(act==="title"){ openTitleSheet(dateStr); }
   else if(act==="log"){ openLogSheet(dateStr); }
@@ -782,9 +787,8 @@ function openLogSheet(dateStr){
 function openMenu(){
   $("#shMenu").innerHTML = `
     <h3>☰ Menu</h3>
-    <button class="menuitem" data-m="me"><span class="g">👤 ${me? "Jij bent: "+esc(me) : "Jezelf toevoegen"}<span class="sub">Tik je naam aan of meld je aan — wordt onthouden op dit apparaat</span></span></button>
     ${(feat("extraDatum", true) || ADMIN)? `<button class="menuitem" data-m="date"><span class="g">📅 Extra datum toevoegen<span class="sub">Anders dan een zaterdag</span></span></button>`: ``}
-    <button class="menuitem" data-m="target"><span class="g">🎯 Optreden / doel instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
+    <button class="menuitem" data-m="target"><span class="g">🎯 Optreden instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
     <button class="menuitem" data-m="hist"><span class="g">🕘 Historie opvragen<span class="sub">Eerdere dagen (onderaan de lijst)</span></span></button>
     ${ADMIN? `<button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>
               <button class="menuitem" data-m="feats"><span class="g">⚙️ Instellingen &amp; features<span class="sub">Alleen zichtbaar voor beheerders</span></span></button>`: ``}
@@ -794,14 +798,12 @@ function openMenu(){
   $("#ovMenu").classList.add("show");
 }
 $("#btnMenu").onclick = openMenu;
-$("#btnMe").onclick = openMeSheet;
 $("#ovMenu").addEventListener("click", e=>{
   if(e.target.id==="ovMenu"){ $("#ovMenu").classList.remove("show"); return; }
   const b = e.target.closest("[data-m]"); if(!b) return;
   $("#ovMenu").classList.remove("show");
   const m = b.dataset.m;
-  if(m==="me") openMeSheet();
-  else if(m==="date") openDateSheet();
+  if(m==="date") openDateSheet();
   else if(m==="target") openTargetSheet();
   else if(m==="hist"){ showHist = true; render(); window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }
   else if(m==="fulllog") openFullLog();
@@ -840,80 +842,6 @@ function openFeatsSheet(){
   $("#fOk").onclick = closeSheet;
 }
 
-function openMeSheet(){
-  const isMember = DATA.members.includes(me);
-  const isExtra = (DATA.recurring_guests||[]).some(g=>g.name===me);
-  if(isMember || isExtra){
-    openSheet(`<h3>Jij bent ${esc(me)}</h3>
-      <p style="font-size:13px;color:var(--ink2)">${isMember? "Je alias in de bandlijst — mag je zelf aanpassen:" : "Je naam — mag je zelf aanpassen:"}</p>
-      <input type="text" id="meName" value="${esc(me)}" autocomplete="off" maxlength="30">
-      <button class="mini" id="meClear" style="margin-top:8px">✕ naam wissen</button>
-      ${isMember? "" : `<p style="font-size:12px;color:var(--ink2);margin-top:-4px">Als gast zie je je eigen chip op alle dagen om in te tikken. De band ziet je pas op dagen waarop je iets hebt ingevuld.</p>`}
-      <button class="cta" id="meOk">Opslaan</button>`);
-    $("#meName").focus();
-    $("#meClear").onclick = ()=>{ $("#meName").value = ""; $("#meName").focus(); };
-    $("#meOk").onclick = ()=>{
-      const n = $("#meName").value.trim();
-      if(!n){ toast("Vul een naam in"); return; }
-      if(n!==me){
-        if(isMember) renameMember(me, n);
-        else{
-          const g = DATA.recurring_guests.find(g=>g.name===me);
-          if(g) g.name = n;
-          Object.values(DATA.days).forEach(d=>{
-            if(d.st && me in d.st){ d.st[n]=d.st[me]; delete d.st[me]; }
-          });
-          logChange(n, "", me, "naam gewijzigd");
-        }
-      me = n; localStorage.setItem("bd_me", n);
-      }
-      save(); closeSheet(); render();
-    };
-  } else {
-    openSheet(`<h3>Wie ben jij?</h3>
-      <div class="chips" style="justify-content:flex-start;padding:6px 0 2px">
-        ${DATA.members.map(m=>`<span class="chip" data-claim="${esc(m)}"><span class="st"></span>${esc(m)}</span>`).join("")}
-        ${(DATA.recurring_guests||[]).map(g=>`<span class="chip" data-claim="${esc(g.name)}"><span class="st"></span>${esc(g.name)}</span>`).join("")}
-        <span class="chip" id="chipNew"><span class="st"></span><input type="text" id="newName" placeholder="naam…" maxlength="30" style="border:none;outline:none;font:inherit;width:90px;background:none;padding:0"></span>
-      </div>
-      <p style="font-size:12px;color:var(--ink2);margin-top:4px">Je chip verschijnt op alle dagen om in te tikken; anderen zien je pas als je ergens op getikt hebt.</p>
-      <button class="cta" id="btnNew">Dat ben ik</button>`);
-    $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
-      b.onclick = ()=>{
-        me = b.dataset.claim; localStorage.setItem("bd_me", me);
-        ACCOUNT = me; localStorage.setItem("bd_user", me);
-        closeSheet(); render();
-      };
-    });
-    $("#btnNew").onclick = ()=>{
-      const n = $("#newName").value.trim();
-      if(!n){ toast("Vul je naam in"); return; }
-      if(DATA.members.includes(n) || (DATA.recurring_guests||[]).some(g=>g.name===n)){ toast("Die naam bestaat al"); return; }
-      me = n; localStorage.setItem("bd_me", n);
-      closeSheet(); render();
-    };
-  }
-}
-
-function openGuestSignup(){
-  openSheet(`<h3>Welkom!</h3>
-    <input type="text" id="gName" placeholder="Je naam" autocomplete="off" maxlength="30">
-    <p style="font-size:12px;color:var(--ink2);margin-top:-4px">Je chip staat daarna op alle dagen klaar om in te tikken. De band ziet je pas op dagen waarop je iets hebt ingevuld.</p>
-    <button class="cta" id="gOk">Aanmelden</button>`);
-  $("#gName").focus();
-  $("#gOk").onclick = ()=>{
-    const n = $("#gName").value.trim();
-    if(!n){ toast("Vul een naam in"); return; }
-    if(DATA.members.includes(n) || (DATA.recurring_guests||[]).some(g=>g.name===n)){ toast("Die naam bestaat al"); return; }
-    me = n; localStorage.setItem("bd_me", n);
-    if(!DATA.recurring_guests) DATA.recurring_guests = [];
-    DATA.recurring_guests.push({name:n, since:today()});
-    logChange(n, "", "", "aangemeld");
-    save();
-    closeSheet(); render();
-  };
-}
-// naam/identiteit loopt via het ☰-menu ("Wie ben jij?")
 function openDateSheet(){
   openSheet(`<h3>Extra datum toevoegen</h3>
     <input type="date" id="dDate">
@@ -931,7 +859,7 @@ function openDateSheet(){
 }
 
 function openTargetSheet(){
-  openSheet(`<h3>🎯 Optreden / doel</h3>
+  openSheet(`<h3>🎯 Optreden</h3>
     <input type="date" id="tDate" value="${DATA.target||""}">
     <button class="cta" id="tOk">Instellen</button>
     <button class="cta" id="tClear" style="background:#8e8e93;margin-top:10px">Target verwijderen</button>`);
