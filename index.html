@@ -191,7 +191,6 @@
 <div class="overlay" id="ovSheet"><div class="sheet" id="shSheet"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 /* ================= CONFIG =================
  * Zonder login: de app praat met een kleine Google Apps Script-webapp die
@@ -206,13 +205,12 @@ const CONFIG = {
   MEMBERS: ["Frans", "Peter", "Patrick", "Wim", "Harrie"],  // vaste bandleden (aliases, zelf aanpasbaar)
   SATURDAYS: 10,                       // aantal komende zaterdagen
   HISTORY_MONTHS: 6,                   // dagen ouder dan dit worden uit de data gesnoeid
-  LOG_MAX: 300,                        // max regels in de wijzigingenlog
-  CLIENT_ID: "513652605614-3hfn0paa2cs6p506spkqs1qrfgcnuhp5.apps.googleusercontent.com"
+  LOG_MAX: 300                        // max regels in de wijzigingenlog
 };
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "2.4";
+const VERSION = "3.1";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -233,16 +231,6 @@ function applyOp(o){
   else if(o.t==="addg"){ const d=day(o.d); if(!d.guests.some(g=>g.name===o.n)) d.guests.push({name:o.n, st:o.s||""}); }
   else if(o.t==="rmg"){ const d=day(o.d); d.guests = d.guests.filter(g=>g.name!==o.n); }
   else if(o.t==="delday"){ delete DATA.days[o.d]; }
-  else if(o.t==="acct"){ if(!DATA.accounts) DATA.accounts={}; DATA.accounts[o.e]=o.n; }
-}
-function storeAccount(){                     // koppelt het Google-account aan de gekozen naam
-  if(!ACCOUNT || !me) return;
-  if(!DATA.accounts) DATA.accounts = {};
-  if(DATA.accounts[ACCOUNT] !== me){
-    DATA.accounts[ACCOUNT] = me;
-    queueOp({t:"acct", e:ACCOUNT, n:me});
-    save();
-  }
 }
 
 /* ---------- helpers ---------- */
@@ -336,14 +324,14 @@ async function load(){
   if(local){ try{ DATA = JSON.parse(local); }catch(e){} }
   if(CONFIG.SCRIPT_URL){
     try{
-      const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
+      const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + authQS());
       if(r.ok){
         const env = await r.json();
         if(env && env.auth === false){
-          if(ID_TOKEN) setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + " — tik op de avatar of hieronder" + syncTimeTxt());
+          if(ACCOUNT || PWH) setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + syncTimeTxt());
           needLoginModal();
         }   // scherm blijft gewoon tekenen met lokale data
-        else if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
+        else if(env && env.data && env.data.days){ DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; localStorage.setItem("bd_data", JSON.stringify(DATA)); }
       }
       if(!loginAsked) setSync(true, (dirty? "Lokale wijzigingen nog niet opgeslagen in de cloud" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
     }catch(e){ setSync(false, "Cloud niet bereikbaar – lokale gegevens"); }
@@ -361,58 +349,44 @@ function setSync(ok, txt){
 
 let lastSyncT = null;      // tijdstip laatste geslaagde cloud-sync
 
-/* ---------- Google-login (identiteitscontrole) ---------- */
-let ID_TOKEN = "";        // Google ID-token (vervalt na ~1 uur, wordt stil ververst)
-let ACCOUNT = localStorage.getItem("bd_email") || "";   // gecontroleerd mailadres
+/* ---------- Toegang: naam + band-wachtwoord (per apparaat onthouden) ---------- */
+let ACCOUNT = localStorage.getItem("bd_user") || "";   // de naam waarmee je bent ingelogd
+let PWH = localStorage.getItem("bd_pwh") || "";         // SHA-256 van het band-wachtwoord
+let ADMIN = false;                                     // bepaalt de backend na elke sync
 let loginAsked = false;
 
-function jwtEmail(tok){                        // e-mail uit het token lezen (alleen ter info)
-  try{
-    const p = JSON.parse(decodeURIComponent(escape(atob(tok.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")))));
-    return p.email || "";
-  }catch(e){ return ""; }
+async function sha256(s){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
-function initGoogle(){
-  if(!CONFIG.CLIENT_ID) return;
-  const start = ()=>{ if(!window.google || !google.accounts) return setTimeout(start, 200);
-    google.accounts.id.initialize({
-      client_id: CONFIG.CLIENT_ID,
-      callback: resp=>{
-        try{
-          ID_TOKEN = resp.credential;
-          ACCOUNT = jwtEmail(ID_TOKEN);
-          if(ACCOUNT) localStorage.setItem("bd_email", ACCOUNT);
-          loginAsked = false;
-          closeSheet();
-          setSync(true, "Ingelogd" + (ACCOUNT? " als " + ACCOUNT : "") + " – synchroniseren…" + syncTimeTxt());
-          linkAccount();
-          load();
-        }catch(e){ console.error("login-callback", e); }
-      },
-      auto_select: true
-    });
-    google.accounts.id.prompt();                // stille inlog-poging (One Tap)
-  };
-  start();
-}
-function linkAccount(){                          // e-mail ↔ bandnaam koppelen
-  if(!ACCOUNT || !me) return;
-  if(!DATA.accounts) DATA.accounts = {};
-  if(DATA.accounts[ACCOUNT] && DATA.accounts[ACCOUNT] !== me){
-    me = DATA.accounts[ACCOUNT]; localStorage.setItem("bd_me", me);
-  }
-}
+function authQS(){ return (ACCOUNT? "&u=" + encodeURIComponent(ACCOUNT) : "") + (PWH? "&k=" + PWH : ""); }
 function needLoginModal(){
   if(loginAsked) return;
   loginAsked = true;
-  setSync(false, "Eerst inloggen bij Google");
+  setSync(false, "Eerst inloggen");
   openSheet(`<h3>🔐 Inloggen</h3>
-    <p style="font-size:14px;color:var(--ink2)">Speleu? werkt mee met je Google-account. Kies hieronder het account waarmee je meespeelt.</p>
-    <div id="gBtnWrap" style="display:flex;justify-content:center;margin:6px 0"></div>
-    <button class="cta" id="gBtn">Opnieuw proberen</button>`);
-  const drawBtn = ()=>{ try{ google.accounts.id.renderButton($("#gBtnWrap"), { theme: "outline", size: "large" }); }catch(e){ setTimeout(drawBtn, 300); } };
-  drawBtn();   // Google-knop (popup-flow, werkt ook in Safari); wacht tot GSI geladen is
-  $("#gBtn").onclick = ()=>{ try{ google.accounts.id.prompt(); }catch(e){} };
+    <p style="font-size:14px;color:var(--ink2)">Vul je naam (zoals in de band) en het band-wachtwoord in. Wordt op dit apparaat onthouden.</p>
+    <input type="text" id="liName" placeholder="Je naam" value="${esc(ACCOUNT||"")}" autocomplete="off" style="margin-bottom:8px">
+    <input type="password" id="liPw" placeholder="Band-wachtwoord" autocomplete="off">
+    <button class="cta" id="liOk">Aanmelden</button>`);
+  $("#liName").focus();
+  $("#liOk").onclick = async ()=>{
+    const nm = $("#liName").value.trim();
+    const pw = $("#liPw").value;
+    if(!nm || !pw){ toast("Vul beide velden in"); return; }
+    ACCOUNT = nm; localStorage.setItem("bd_user", nm);
+    me = nm; localStorage.setItem("bd_me", nm);
+    PWH = await sha256(pw); localStorage.setItem("bd_pwh", PWH);
+    loginAsked = false;
+    closeSheet();
+    setSync(true, "Ingelogd als " + nm + " – synchroniseren…" + syncTimeTxt());
+    load();
+  };
+}
+function feat(key, dflt){                      // feature-toggle uitlezen (staat in de gedeelde data)
+  if(!DATA.features) return dflt;
+  const v = DATA.features[key];
+  return v === undefined? dflt : v;
 }
 
 function syncTimeTxt(){
@@ -432,10 +406,10 @@ async function pushCloud(){
     const r = await fetch(CONFIG.SCRIPT_URL, {
       method:"POST",
       headers:{"Content-Type":"text/plain"},   // text/plain → geen CORS-preflight
-      body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, tok: ID_TOKEN})
+      body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, u: ACCOUNT, k: PWH})
     });
     const res = await r.json();
-    if(res && res.auth === false){ needLoginModal(); return; }
+    if(res && res.auth === false){ setSync(false, "Login geweigerd: " + (res.err || "onbekende reden")); needLoginModal(); return; }
     if(res && res.ok){
       dirty = false; pendingOps = []; serverRev = res.rev||0; pendingLog = [];
       lastSyncT = new Date();
@@ -449,7 +423,7 @@ async function pushCloud(){
       logChange("—", "", "conflict", "andere wijzigingen samengevoegd");
       const r2 = await fetch(CONFIG.SCRIPT_URL, {
         method:"POST", headers:{"Content-Type":"text/plain"},
-        body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, tok: ID_TOKEN})
+        body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, u: ACCOUNT, k: PWH})
       });
       const res2 = await r2.json();
       if(res2 && res2.auth === false){ needLoginModal(); return; }
@@ -466,7 +440,7 @@ async function pushCloud(){
 async function pull(){
   if(!CONFIG.SCRIPT_URL || dirty) return;
   try{
-    const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
+    const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + authQS());
     if(!r.ok) return;
     const env = await r.json();
     if(env && env.auth === false){ return; }   // stil: wachten op login
@@ -755,7 +729,7 @@ let logCache = [];
 async function fetchLog(){
   if(CONFIG.SCRIPT_URL){
     try{
-      const r = await fetch(CONFIG.SCRIPT_URL + "?log=1&t=" + Date.now() + (ID_TOKEN? "&tok=" + encodeURIComponent(ID_TOKEN) : ""));
+      const r = await fetch(CONFIG.SCRIPT_URL + "?log=1&t=" + Date.now() + authQS());
       if(r.ok){ const env = await r.json(); if(env && env.auth === false){ needLoginModal(); return pendingLog; }
         if(env && Array.isArray(env.log)){
         logCache = env.log.sort((a,b)=> String(b.t).localeCompare(String(a.t)));   // nieuwste eerst
@@ -786,10 +760,11 @@ function openMenu(){
   $("#shMenu").innerHTML = `
     <h3>☰ Menu</h3>
     <button class="menuitem" data-m="me"><span class="g">👤 ${me? "Jij bent: "+esc(me) : "Jezelf toevoegen"}<span class="sub">Tik je naam aan of meld je aan — wordt onthouden op dit apparaat</span></span></button>
-    <button class="menuitem" data-m="date"><span class="g">📅 Extra datum toevoegen<span class="sub">Anders dan een zaterdag</span></span></button>
+    ${(feat("extraDatum", true) || ADMIN)? `<button class="menuitem" data-m="date"><span class="g">📅 Extra datum toevoegen<span class="sub">Anders dan een zaterdag</span></span></button>`: ``}
     <button class="menuitem" data-m="target"><span class="g">🎯 Optreden / doel instellen<span class="sub">${DATA.target? "Nu: "+fmtDate(DATA.target) : "Wordt bovenaan gemarkeerd met afteldagen"}</span></span></button>
     <button class="menuitem" data-m="hist"><span class="g">🕘 Historie opvragen<span class="sub">Eerdere dagen (onderaan de lijst)</span></span></button>
-    <button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>
+    ${(feat("volledigeLog", true) || ADMIN)? `<button class="menuitem" data-m="fulllog"><span class="g">📜 Volledige wijzigingenlog</span></button>`: ``}
+    ${ADMIN? `<button class="menuitem" data-m="feats"><span class="g">⚙️ Instellingen &amp; features<span class="sub">Alleen zichtbaar voor beheerders</span></span></button>`: ``}
     <a class="menuitem" href="${CONFIG.MONOLISA_URL}" target="_blank" rel="noopener"><span class="g">🔊 Mixes<span class="sub">Moly · muziekspeler</span></span></a>
     <div style="text-align:center;font-size:11px;color:var(--ink2);padding-top:16px">Speleu? v${VERSION}</div>`;
   $("#ovMenu").classList.add("show");
@@ -806,7 +781,31 @@ $("#ovMenu").addEventListener("click", e=>{
   else if(m==="target") openTargetSheet();
   else if(m==="hist"){ window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}); }
   else if(m==="fulllog") openFullLog();
+  else if(m==="feats") openFeatsSheet();
 });
+
+function openFeatsSheet(){
+  if(!ADMIN){ toast("Alleen voor beheerders"); return; }
+  const toggles = [
+    { key: "extraDatum",  label: "📅 Extra datum toevoegen", sub: "Mogen alle bandleden extra dagen toevoegen, of alleen beheerders?" },
+    { key: "volledigeLog", label: "📜 Volledige wijzigingenlog", sub: "Zichtbaar voor iedereen, of alleen voor beheerders?" }
+  ];
+  openSheet(`<h3>⚙️ Instellingen &amp; features</h3>
+    <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Wijzigingen gelden meteen voor de hele band (binnen ~10 s, zonder verversen)</p>
+    ${toggles.map(t=>`
+      <label class="checkrow" style="margin-top:10px"><input type="checkbox" data-fk="${t.key}" ${feat(t.key, true)? "checked":""}> <b>${t.label}</b>
+      <div style="font-size:12px;color:var(--ink2);font-weight:400">${t.sub}</div></label>`).join("")}
+    <button class="cta" id="fOk">Klaar</button>`);
+  $("#shSheet").querySelectorAll("[data-fk]").forEach(cb=>{
+    cb.onchange = ()=>{
+      if(!DATA.features) DATA.features = {};
+      DATA.features[cb.dataset.fk] = cb.checked;
+      logChange(me || "—", "", cb.dataset.fk, cb.checked? "aan" : "uit");
+      save();   // sync't meteen → andere apparaten zien het binnen 10 s
+    };
+  });
+  $("#fOk").onclick = closeSheet;
+}
 
 function openMeSheet(){
   const isMember = DATA.members.includes(me);
@@ -850,7 +849,7 @@ function openMeSheet(){
     $("#shSheet").querySelectorAll("[data-claim]").forEach(b=>{
       b.onclick = ()=>{
         me = b.dataset.claim; localStorage.setItem("bd_me", me);
-        storeAccount();
+        ACCOUNT = me; localStorage.setItem("bd_user", me);
         closeSheet(); render();
       };
     });
@@ -885,7 +884,6 @@ function openGuestSignup(){
     DATA.recurring_guests.push({name:n, since:today()});
     logChange(n, "", "", "aangemeld");
     save();
-    storeAccount();
     closeSheet(); render();
   };
 }
@@ -944,7 +942,6 @@ function openFullLog(){
 $("#fabAdd").onclick = openDateSheet;
 
 /* ---------- start ---------- */
-initGoogle();
 load();
 </script>
 </body>
