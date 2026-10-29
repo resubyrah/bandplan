@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.10";
+const VERSION = "3.11";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -339,10 +339,11 @@ async function load(){
         const env = await r.json();
         if(env && env.auth === false){
           if(ACCOUNT || PWH) setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + syncTimeTxt());
+          wantPw = true;                  // server vroeg om een wachtwoord → volgende modal wél met wachtwoordveld
           needLoginModal();
         }   // scherm blijft gewoon tekenen met lokale data
         else if(env && env.data && env.data.days){
-          DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; localStorage.setItem("bd_data", JSON.stringify(DATA));
+          DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; wantPw = false; localStorage.setItem("bd_data", JSON.stringify(DATA));
           if(env.tok && !PWH){                  // grace-login geaccepteerd: sessie-code van de server bewaren
             PWH = env.tok; localStorage.setItem("bd_pwh", PWH);
             toast("Welkom! Op een nieuw apparaat is voortaan het wachtwoord nodig");
@@ -381,20 +382,22 @@ async function sha256(s){
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 function authQS(){ return (ACCOUNT? "&u=" + encodeURIComponent(ACCOUNT) : "") + (PWH? "&k=" + PWH : ""); }
+let wantPw = false;      // wachtwoordveld pas tonen nadat de server om een wachtwoord vroeg
 function needLoginModal(){
   if(loginAsked) return;
   loginAsked = true;
   setSync(false, "Eerst inloggen");
   openSheet(`<h3>🔐 Inloggen</h3>
-    <p style="font-size:14px;color:var(--ink2)">Vul je naam in. Wachtwoord mag je weglaten als dit je eerste keer op dit apparaat is — daarna is het verplicht.</p>
+    <p style="font-size:14px;color:var(--ink2)">${wantPw? "Vul je naam en het wachtwoord in." : "Vul je naam in."}</p>
     <input type="text" id="liName" placeholder="Je naam" value="${esc(ACCOUNT||"")}" autocomplete="off" style="margin-bottom:8px">
-    <input type="password" id="liPw" placeholder="Wachtwoord (leeg = eerste keer)" autocomplete="off">
+    ${wantPw? `<input type="password" id="liPw" placeholder="Wachtwoord" autocomplete="off">` : ""}
     <button class="cta" id="liOk">Aanmelden</button>`);
   $("#liName").focus();
   $("#liOk").onclick = async ()=>{
     const nm = $("#liName").value.trim();
-    const pw = $("#liPw").value;
+    const pw = wantPw && $("#liPw")? $("#liPw").value : "";
     if(!nm){ toast("Vul je naam in"); return; }
+    if(wantPw && !pw){ toast("Vul ook het wachtwoord in"); return; }
     ACCOUNT = nm; localStorage.setItem("bd_user", nm);
     me = nm; localStorage.setItem("bd_me", nm);
     PWH = pw? await sha256(pw) : "";        // leeg = grace-poging (server beslist)
@@ -440,7 +443,7 @@ async function pushCloud(){
       body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, u: ACCOUNT, k: PWH})
     });
     const res = await r.json();
-    if(res && res.auth === false){ setSync(false, "Login geweigerd: " + (res.err || "onbekende reden")); needLoginModal(); return; }
+    if(res && res.auth === false){ setSync(false, "Login geweigerd: " + (res.err || "onbekende reden")); wantPw = true; needLoginModal(); return; }
     if(res && res.ok){
       dirty = false; pendingOps = []; serverRev = res.rev||0; pendingLog = [];
       lastSyncT = new Date();
