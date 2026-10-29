@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.8";
+const VERSION = "3.10";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -343,6 +343,10 @@ async function load(){
         }   // scherm blijft gewoon tekenen met lokale data
         else if(env && env.data && env.data.days){
           DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; localStorage.setItem("bd_data", JSON.stringify(DATA));
+          if(env.tok && !PWH){                  // grace-login geaccepteerd: sessie-code van de server bewaren
+            PWH = env.tok; localStorage.setItem("bd_pwh", PWH);
+            toast("Welkom! Op een nieuw apparaat is voortaan het wachtwoord nodig");
+          }
           if(!loginLogged && ACCOUNT){                 // wie, wanneer, vanaf welk apparaat/regio
             loginLogged = true;
             logChange("login", "", "app-open", deviceInfo());
@@ -382,18 +386,19 @@ function needLoginModal(){
   loginAsked = true;
   setSync(false, "Eerst inloggen");
   openSheet(`<h3>🔐 Inloggen</h3>
-    <p style="font-size:14px;color:var(--ink2)">Vul je naam en wachtwoord in. Wordt op dit apparaat onthouden.</p>
+    <p style="font-size:14px;color:var(--ink2)">Vul je naam in. Wachtwoord mag je weglaten als dit je eerste keer op dit apparaat is — daarna is het verplicht.</p>
     <input type="text" id="liName" placeholder="Je naam" value="${esc(ACCOUNT||"")}" autocomplete="off" style="margin-bottom:8px">
-    <input type="password" id="liPw" placeholder="Wachtwoord" autocomplete="off">
+    <input type="password" id="liPw" placeholder="Wachtwoord (leeg = eerste keer)" autocomplete="off">
     <button class="cta" id="liOk">Aanmelden</button>`);
   $("#liName").focus();
   $("#liOk").onclick = async ()=>{
     const nm = $("#liName").value.trim();
     const pw = $("#liPw").value;
-    if(!nm || !pw){ toast("Vul beide velden in"); return; }
+    if(!nm){ toast("Vul je naam in"); return; }
     ACCOUNT = nm; localStorage.setItem("bd_user", nm);
     me = nm; localStorage.setItem("bd_me", nm);
-    PWH = await sha256(pw); localStorage.setItem("bd_pwh", PWH);
+    PWH = pw? await sha256(pw) : "";        // leeg = grace-poging (server beslist)
+    localStorage.setItem("bd_pwh", PWH);
     loginAsked = false;
     closeSheet();
     setSync(true, "Ingelogd als " + nm + " – synchroniseren…" + syncTimeTxt());
@@ -823,13 +828,23 @@ function closeMenu(){ $("#ovMenu").classList.remove("show"); }
 function openFeatsSheet(){
   if(!ADMIN){ toast("Alleen voor beheerders"); return; }
   const toggles = [
-    { key: "extraDatum",  label: "📅 Extra datum toevoegen", sub: "Mogen alle bandleden extra dagen toevoegen, of alleen beheerders?" }
+    { key: "extraDatum",  label: "📅 Extra datum toevoegen", sub: "Mogen alle bandleden extra dagen toevoegen, of alleen beheerders?" },
+    { key: "graceLogin",  label: "🔓 Eerste keer zonder wachtwoord", sub: "Nieuw op een apparaat: eerste keer mag zonder wachtwoord. Uit = wachtwoord altijd verplicht (bestaande gratis-sessies vervallen dan)" }
   ];
   openSheet(`<h3>⚙️ Instellingen &amp; features</h3>
     <p style="font-size:12px;color:var(--ink2);margin-top:-8px">Wijzigingen gelden meteen voor de hele band (binnen ~10 s, zonder verversen)</p>
     ${toggles.map(t=>`
       <label class="checkrow" style="margin-top:10px"><input type="checkbox" data-fk="${t.key}" ${feat(t.key, true)? "checked":""}> <b>${t.label}</b>
       <div style="font-size:12px;color:var(--ink2);font-weight:400">${t.sub}</div></label>`).join("")}
+    <div style="margin-top:18px;padding-top:12px;border-top:1px solid #e8e6df">
+      <b style="font-size:14px">↺ Gratis-sessies</b>
+      <div style="font-size:12px;color:var(--ink2);margin:4px 0 8px">Deze namen zijn ooit zonder wachtwoord binnengekomen. Wis een sessie om iemand op een nieuw apparaat opnieuw zonder wachtwoord te laten inloggen.</div>
+      ${Object.keys((DATA.sessions||{})).length? Object.keys(DATA.sessions).map(n=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:4px 0">
+          <span style="font-size:14px">${esc(n)}</span>
+          <button class="mini" data-ress="${esc(n)}" style="color:#c0392b">↺ sessie wissen</button>
+        </div>`).join("") : `<div style="font-size:13px;color:var(--ink2)">Nog geen gratis-sessies uitgegeven.</div>`}
+    </div>
     <button class="cta" id="fOk">Klaar</button>`);
   $("#shSheet").querySelectorAll("[data-fk]").forEach(cb=>{
     cb.onchange = ()=>{
@@ -837,6 +852,17 @@ function openFeatsSheet(){
       DATA.features[cb.dataset.fk] = cb.checked;
       logChange(me || "—", "", cb.dataset.fk, cb.checked? "aan" : "uit");
       save();   // sync't meteen → andere apparaten zien het binnen 10 s
+    };
+  });
+  $("#shSheet").querySelectorAll("[data-ress]").forEach(b=>{
+    b.onclick = ()=>{
+      const n = b.dataset.ress;
+      if(DATA.sessions && DATA.sessions[n]){
+        delete DATA.sessions[n];
+        logChange(n, "", "gratis-sessie", "gewist — mag opnieuw zonder wachtwoord");
+        save();
+        openFeatsSheet();   // lijst verversen
+      }
     };
   });
   $("#fOk").onclick = closeSheet;
