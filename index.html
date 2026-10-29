@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.11";
+const VERSION = "3.12";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -338,8 +338,10 @@ async function load(){
       if(r.ok){
         const env = await r.json();
         if(env && env.auth === false){
-          if(ACCOUNT || PWH) setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + syncTimeTxt());
-          wantPw = true;                  // server vroeg om een wachtwoord → volgende modal wél met wachtwoordveld
+          if(ACCOUNT || PWH){               // alleen bij een échte inlogpoging (niet bij uitgelogde polls)
+            setSync(false, "Login geweigerd: " + (env.err || "onbekende reden") + syncTimeTxt());
+            wantPw = true;                  // server vroeg om een wachtwoord → volgende modal wél met wachtwoordveld
+          }
           needLoginModal();
         }   // scherm blijft gewoon tekenen met lokale data
         else if(env && env.data && env.data.days){
@@ -395,9 +397,10 @@ function needLoginModal(){
   $("#liName").focus();
   $("#liOk").onclick = async ()=>{
     const nm = $("#liName").value.trim();
-    const pw = wantPw && $("#liPw")? $("#liPw").value : "";
+    const pwEl = $("#liPw");               // bestaat alleen als de server eerder om een wachtwoord vroeg
+    const pw = pwEl? pwEl.value : "";
     if(!nm){ toast("Vul je naam in"); return; }
-    if(wantPw && !pw){ toast("Vul ook het wachtwoord in"); return; }
+    if(pwEl && !pw){ toast("Vul ook het wachtwoord in"); return; }
     ACCOUNT = nm; localStorage.setItem("bd_user", nm);
     me = nm; localStorage.setItem("bd_me", nm);
     PWH = pw? await sha256(pw) : "";        // leeg = grace-poging (server beslist)
