@@ -348,7 +348,6 @@ async function load(){
           DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; wantPw = false; localStorage.setItem("bd_data", JSON.stringify(DATA));
           if(env.tok && !PWH){                  // grace-login geaccepteerd: sessie-code van de server bewaren
             PWH = env.tok; localStorage.setItem("bd_pwh", PWH);
-            toast("Welkom! Op een nieuw apparaat is voortaan het wachtwoord nodig");
           }
           if(!loginLogged && ACCOUNT){                 // wie, wanneer, vanaf welk apparaat/regio
             loginLogged = true;
