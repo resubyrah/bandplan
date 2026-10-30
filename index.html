@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.15";
+const VERSION = "3.16";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -480,6 +480,7 @@ async function pushCloud(){
   const ops = pendingOps.slice();          // wat déze push dekt (tikken tijdens de vlucht vallen erbuiten)
   const logs = pendingLog.slice();
   prune();
+  const sentStr = JSON.stringify(DATA);     // snapshot vóór verzenden (voor botsings-vergelijking)
   try{
     const r = await fetch(CONFIG.SCRIPT_URL, {
       method:"POST",
@@ -493,9 +494,26 @@ async function pushCloud(){
       syncing = false; return;
     }
     else if(res && res.conflict){
-      // Iemand anders heeft ondertussen opgeslagen: verse data ophalen,
-      // ALLE nog-openstaande recepten eroverheen leggen en opnieuw sturen.
+      // Botsing. Twee gevallen:
+      //  a) inhoud identiek (snel verversen: de vorige POST landde tóch op de server)
+      //     → stilletjes overnemen, geen merge, geen logruis, alleen evt. logrestjes sturen
+      //  b) echte verschillen → verse data ophalen, ALLE openstaande recepten erop leggen, opnieuw sturen
+      const stil = ops.length===0 && pendingOps.length===0
+                 && JSON.stringify(res.data||{}) === sentStr;
       DATA = res.data || DATA; serverRev = res.rev||0;
+      if(stil){
+        if(pendingLog.length){
+          const logs2 = pendingLog.slice();
+          const rq = await fetch(CONFIG.SCRIPT_URL, {
+            method:"POST", headers:{"Content-Type":"text/plain"},
+            body: JSON.stringify({rev: serverRev, data: DATA, log: logs2, u: ACCOUNT, k: PWH})
+          });
+          const resq = await rq.json();
+          if(resq && resq.ok){ syncOk(resq.rev, ops, logs2); syncing = false; return; }
+        }
+        syncOk(res.rev, ops, logs);        // niets aan de hand: server stond al zo
+        syncing = false; return;
+      }
       const failed = applyOpsSafe();       // mislukte recepten blijven in de wachtrij staan
       logChange("—", "", "conflict", "andere wijzigingen samengevoegd");
       render();
