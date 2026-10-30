@@ -210,7 +210,7 @@ const CONFIG = {
 /* ========================================= */
 
 const STATUS = ["ja","nee","misschien"];   // tik op chip = doorlopen; "deels" kan in een opmerking
-const VERSION = "3.12";
+const VERSION = "3.15";
 const MONTHS = ["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"];
 const DOWS = ["zo","ma","di","wo","do","vr","za"];
 
@@ -289,8 +289,19 @@ function removeGuest(dateStr, name){
 /* ---------- opslag: localStorage + Apps Script (zonder login) ---------- */
 function save(){
   localStorage.setItem("bd_data", JSON.stringify(DATA));
+  persistPending();                       // recepten + log ook overleven een ververs
   dirty = true; prune(); render();
   scheduleSync();          // wacht tot de gebruiker 5 s niets doet, sync dan alles in één keer
+}
+function persistPending(){                // openstaande recepten en logregels bewaren
+  try{
+    localStorage.setItem("bd_ops", JSON.stringify(pendingOps));
+    localStorage.setItem("bd_log", JSON.stringify(pendingLog));
+  }catch(e){}
+}
+function restorePending(){                // na ververs: terugzetten wat nog niet gesynct is
+  try{ pendingOps = JSON.parse(localStorage.getItem("bd_ops")||"[]") || []; }catch(e){ pendingOps = []; }
+  try{ pendingLog = JSON.parse(localStorage.getItem("bd_log")||"[]") || []; }catch(e){ pendingLog = []; }
 }
 function prune(){
   const cut = new Date(); cut.setHours(12,0,0,0);
@@ -330,6 +341,7 @@ function renameMember(oldN, newN){
 }
 
 async function load(){
+  restorePending();                         // nog niet-gesyncte recepten terugzetten na een ververs
   const local = localStorage.getItem("bd_data");
   if(local){ try{ DATA = JSON.parse(local); }catch(e){} }
   if(CONFIG.SCRIPT_URL){
@@ -346,13 +358,21 @@ async function load(){
         }   // scherm blijft gewoon tekenen met lokale data
         else if(env && env.data && env.data.days){
           DATA = env.data; serverRev = env.rev||0; ADMIN = env.admin === true; wantPw = false; localStorage.setItem("bd_data", JSON.stringify(DATA));
+          if(pendingOps.length){                    // teruggezet/rijpende recepten op de verse data leggen
+            applyOpsSafe();                        // mislukte recepten blijven in de wachtrij
+            dirty = true; scheduleSync();
+          }
           if(env.tok && !PWH){                  // grace-login geaccepteerd: sessie-code van de server bewaren
             PWH = env.tok; localStorage.setItem("bd_pwh", PWH);
           }
           if(!loginLogged && ACCOUNT){                 // wie, wanneer, vanaf welk apparaat/regio
             loginLogged = true;
-            logChange("login", "", "app-open", deviceInfo());
-            save();
+            // ververs je snel achter elkaar, dan staat er vaak al een nog-niet-gesyncte
+            // login-regel in de wachtrij — geen tweede keer opschrijven dus
+            if(!pendingLog.some(l=>l.target==="login" && l.who===me)){
+              logChange("login", "", "app-open", deviceInfo());
+              save();
+            }
           }
         }
       }
@@ -435,46 +455,71 @@ function scheduleSync(){   // debounce: pas syncen als de gebruiker 5 s stil is
   syncTimer = setTimeout(()=>{ if(dirty) pushCloud(); }, 5000);
 }
 
+function applyOpsSafe(){                  // voert álle openstaande recepten uit; geeft de mislukte terug
+  const failed = [];
+  pendingOps.forEach(o=>{ try{ applyOp(o); }catch(e){ failed.push(o); } });
+  return failed;
+}
+
+let syncing = false;      // één push tegelijk: focus-trigger en timer kunnen anders botsen
+function syncOk(rev, ops, logs){          // geslaagde push: alleen dit weggebruikte eraf, restjes blijven
+  serverRev = rev||0;
+  pendingOps = pendingOps.filter(o=>ops.indexOf(o)===-1);
+  pendingLog = pendingLog.filter(l=>logs.indexOf(l)===-1);
+  dirty = pendingOps.length>0 || pendingLog.length>0;
+  persistPending();
+  lastSyncT = new Date();
+  setSync(!dirty, (dirty? "Wijzigingen bewaard – nog even syncen" : "Gesynchroniseerd met de gedeelde map") + syncTimeTxt());
+  if(dirty) scheduleSync();               // restje (tikken tijdens de vlucht) opnieuw inplannen
+}
+
 async function pushCloud(){
   if(!CONFIG.SCRIPT_URL) return;
+  if(syncing){ scheduleSync(); return; }  // al onderweg → later opnieuw
+  syncing = true;
+  const ops = pendingOps.slice();          // wat déze push dekt (tikken tijdens de vlucht vallen erbuiten)
+  const logs = pendingLog.slice();
   prune();
   try{
     const r = await fetch(CONFIG.SCRIPT_URL, {
       method:"POST",
       headers:{"Content-Type":"text/plain"},   // text/plain → geen CORS-preflight
-      body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, u: ACCOUNT, k: PWH})
+      body: JSON.stringify({rev: serverRev, data: DATA, log: logs, u: ACCOUNT, k: PWH})
     });
     const res = await r.json();
-    if(res && res.auth === false){ setSync(false, "Login geweigerd: " + (res.err || "onbekende reden")); wantPw = true; needLoginModal(); return; }
+    if(res && res.auth === false){ setSync(false, "Login geweigerd: " + (res.err || "onbekende reden")); wantPw = true; needLoginModal(); syncing = false; return; }
     if(res && res.ok){
-      dirty = false; pendingOps = []; serverRev = res.rev||0; pendingLog = [];
-      lastSyncT = new Date();
-      setSync(true, "Gesynchroniseerd met de gedeelde map" + syncTimeTxt());
+      syncOk(res.rev, ops, logs);
+      syncing = false; return;
     }
     else if(res && res.conflict){
       // Iemand anders heeft ondertussen opgeslagen: verse data ophalen,
-      // eigen wijzigingen eroverheen leggen en één keer opnieuw sturen.
+      // ALLE nog-openstaande recepten eroverheen leggen en opnieuw sturen.
       DATA = res.data || DATA; serverRev = res.rev||0;
-      try{ pendingOps.forEach(applyOp); }catch(e){}
+      const failed = applyOpsSafe();       // mislukte recepten blijven in de wachtrij staan
       logChange("—", "", "conflict", "andere wijzigingen samengevoegd");
+      render();
+      const logs2 = pendingLog.slice();
       const r2 = await fetch(CONFIG.SCRIPT_URL, {
         method:"POST", headers:{"Content-Type":"text/plain"},
-        body: JSON.stringify({rev: serverRev, data: DATA, log: pendingLog, u: ACCOUNT, k: PWH})
+        body: JSON.stringify({rev: serverRev, data: DATA, log: logs2, u: ACCOUNT, k: PWH})
       });
       const res2 = await r2.json();
-      if(res2 && res2.auth === false){ needLoginModal(); return; }
-      if(res2 && res2.ok){ dirty = false; pendingOps = []; serverRev = res2.rev||0; pendingLog = [];
-        lastSyncT = new Date();
-        setSync(true, "Gesynchroniseerd met de gedeelde map" + syncTimeTxt()); render(); return; }
+      if(res2 && res2.auth === false){ syncing = false; needLoginModal(); return; }
+      if(res2 && res2.ok){
+        const okOps = ops.filter(o=>failed.indexOf(o)===-1);   // alleen écht verwerkte recepten afvoeren
+        syncOk(res2.rev, okOps, logs2);
+        syncing = false; render(); return;
+      }
       throw new Error();
     }
     else throw new Error();
-  }catch(e){ syncFailedModal(); }
+  }catch(e){ syncing = false; syncFailedModal(); }
 }
 
 // Verse data van anderen ophalen (alleen als we zelf niets open hebben staan)
 async function pull(){
-  if(!CONFIG.SCRIPT_URL || dirty) return;
+  if(!CONFIG.SCRIPT_URL || dirty || syncing) return;
   try{
     const r = await fetch(CONFIG.SCRIPT_URL + "?t=" + Date.now() + authQS());
     if(!r.ok) return;
